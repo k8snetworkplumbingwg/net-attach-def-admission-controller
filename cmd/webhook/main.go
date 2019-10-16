@@ -141,7 +141,7 @@ func initNetDefCount() {
 	if err == nil {
 		localmetrics.UpdateNetDefMetrics(float64(len(list.Items)))
 	} else {
-		glog.Infof("Error getting initial net def count", err)
+		glog.Infof("Error getting initial net def count %v", err)
 	}
 }
 
