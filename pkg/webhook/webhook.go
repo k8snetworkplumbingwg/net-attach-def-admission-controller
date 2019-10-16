@@ -22,12 +22,12 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/K8sNetworkPlumbingWG/net-attach-def-admission-controller/pkg/localmetrics"
+	netv1 "github.com/K8sNetworkPlumbingWG/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/containernetworking/cni/libcni"
 	"github.com/golang/glog"
 	"github.com/intel/multus-cni/types"
-	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/pkg/errors"
-
 	"k8s.io/api/admission/v1beta1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -357,6 +357,7 @@ func ValidateHandler(w http.ResponseWriter, req *http.Request) {
 		handleValidationError(w, ar, err)
 		return
 	}
+	localmetrics.UpdateNetDefMetrics(1.0)
 
 	/* perpare response and send it back to the API server */
 	err = prepareAdmissionReviewResponse(allowed, "", ar)

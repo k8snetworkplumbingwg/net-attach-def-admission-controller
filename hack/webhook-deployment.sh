@@ -53,4 +53,6 @@ cat ${BASE_DIR}/deployments/webhook.yaml | \
 	sed -e "s|\${NAMESPACE}|${NAMESPACE}|g" | \
 	kubectl -n ${NAMESPACE} create -f -
 
+kubectl -n ${NAMESPACE} create -f ${BASE_DIR}/deployments/roles.yaml
 kubectl -n ${NAMESPACE} create -f ${BASE_DIR}/deployments/deployment.yaml
+

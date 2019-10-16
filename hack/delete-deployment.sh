@@ -1,6 +1,16 @@
 NAMESPACE="kube-system"
 BASE_DIR=$(cd $(dirname $0)/..; pwd)
 
+
+# Give help text for parameters.
+function usage()
+{
+    echo -e "./delete-deployment.sh "
+    echo -e "\t-h --help"
+    echo -e "\t--namespace=${NAMESPACE}"
+}
+
+
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
     PARAM=`echo $1 | awk -F= '{print $1}'`
@@ -30,4 +40,5 @@ cat ${BASE_DIR}/deployments/webhook.yaml | \
 	kubectl -n ${NAMESPACE} delete -f -
 
 kubectl -n ${NAMESPACE} delete -f ${BASE_DIR}/deployments/deployment.yaml
+kubectl -n ${NAMESPACE} delete -f ${BASE_DIR}/deployments/roles.yaml
 

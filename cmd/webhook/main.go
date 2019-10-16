@@ -26,14 +26,29 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/K8sNetworkPlumbingWG/net-attach-def-admission-controller/pkg/controller"
+	"github.com/K8sNetworkPlumbingWG/net-attach-def-admission-controller/pkg/localmetrics"
 	"github.com/K8sNetworkPlumbingWG/net-attach-def-admission-controller/pkg/webhook"
+	clientset "github.com/K8sNetworkPlumbingWG/network-attachment-definition-client/pkg/client/clientset/versioned"
 	"github.com/golang/glog"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	utilwait "k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/rest"
+)
+
+const (
+	lMetricsAddress  = ":9091"
+	multusannotation = "k8s.v1.cni.cncf.io/networks"
 )
 
 func main() {
 	/* load configuration */
 	port := flag.Int("port", 443, "The port on which to serve.")
 	address := flag.String("bind-address", "0.0.0.0", "The IP address on which to listen for the --port port.")
+	metricsAddress := flag.String("metrics-listen-address", lMetricsAddress, "metrics server listen address.")
 	cert := flag.String("tls-cert-file", "cert.pem", "File containing the default x509 Certificate for HTTPS.")
 	key := flag.String("tls-private-key-file", "key.pem", "File containing the default x509 private key matching --tls-cert-file.")
 	flag.Parse()
@@ -50,13 +65,28 @@ func main() {
 		glog.Fatalf("error to get process info: %s", err.Error())
 	}
 
+	// Register metrics
+	prometheus.MustRegister(localmetrics.NetDefCounter)
+	prometheus.MustRegister(localmetrics.MultusPodCounter)
+	// Including these stats kills performance when Prometheus polls with multiple targets
+	prometheus.Unregister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+	prometheus.Unregister(prometheus.NewGoCollector())
+
 	/* init API client */
 	webhook.SetupInClusterClient()
+
+	startHTTPMetricServer(*metricsAddress)
+
+	initNetDefCount()
+
+	//Start watching for pod creations
+	go controller.StartWatching()
 
 	go func() {
 		/* register handlers */
 		var httpServer *http.Server
 		http.HandleFunc("/validate", webhook.ValidateHandler)
+
 		http.HandleFunc("/isolate", webhook.IsolateHandler)
 
 		/* start serving */
@@ -92,4 +122,37 @@ func main() {
 
 		time.Sleep(1 * time.Second)
 	}
+
+}
+
+//keeps the count accurate when the pod gets created
+func initNetDefCount() {
+	// intilaize netdef metrics values.
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		glog.Fatal(err)
+	}
+	//get custom clientset for net def, if error ignore
+	netdefclientset, err := clientset.NewForConfig(config)
+	if err != nil {
+		glog.Infof("There was error accessing client set for net def %v", err)
+	}
+	list, err := netdefclientset.K8sCniCncfIoV1().NetworkAttachmentDefinitions("").List(metav1.ListOptions{})
+	if err == nil {
+		localmetrics.UpdateNetDefMetrics(float64(len(list.Items)))
+	} else {
+		glog.Infof("Error getting initial net def count", err)
+	}
+}
+
+func startHTTPMetricServer(metricsAddress string) {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	go utilwait.Until(func() {
+		err := http.ListenAndServe(metricsAddress, mux)
+		if err != nil {
+			utilruntime.HandleError(fmt.Errorf("starting metrics server failed: %v", err))
+		}
+	}, 5*time.Second, utilwait.NeverStop)
+
 }
