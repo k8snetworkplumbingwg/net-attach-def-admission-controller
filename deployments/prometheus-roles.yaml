@@ -4,7 +4,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: prometheus-k8s-Role
-  namespace: kube-system
+  namespace: ${NAMESPACE}
 rules:
 - apiGroups:
   - ""
@@ -19,14 +19,14 @@ rules:
   - list
   - watch
 - nonResourceURLs:
-  - /metrics
+  - "/metrics"
   verbs:  ["*"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: prometheus-k8s-RoleBinding
-  namespace: kube-system
+  namespace: ${NAMESPACE}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -37,4 +37,4 @@ subjects:
   namespace: my-prometheus
 - kind: ServiceAccount
   name: prometheus-operator
-  namespace: my-prometheus
+  namespace: ${PROMETHEUS_NAMESPACE}

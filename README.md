@@ -60,6 +60,13 @@ EOF
 networkattachmentdefinition.k8s.cni.cncf.io/macvlan-conf created
 ```
 
+## Collecting metrics with Prometheus
+Network attachment definition admission controller comes with following metrics.
+  1. No of pod's with k8s.v1.cni.cncf.io/networks annotations 
+  2. No of valid networkattachmentdefinition created.
+
+To install Prometheus and enable scraping the endpoints , execute `./hack/prometheus-deployment.sh` 
+
 ## Building the admission controller
 
 To build the admission controller, ensure it exists in your go path (we recommend you clone it to `$GOPATH/src/github.com/K8sNetworkPlumbingWG/net-attach-def-admission-controller`).

@@ -21,30 +21,44 @@ import (
 
 var log = logf.Log.WithName("netdefattachment")
 var (
+	multusPodEnabledCount = 0.0
+	//NetDefCounter .. increments count for every valid netdef crd
 	NetDefCounter = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "network_attachment_definitions_count",
 			Help: "Metric to count network attachment definitions.",
 		})
-
+	//MultusPodCounter ...  Total no of multus pods in the cluster
 	MultusPodCounter = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "multus_pod_count",
 			Help: "Metric to get total pods using multus.",
 		})
+	//MultusEnabledPodsUp  ... check if any pods with multus config enabled
+	MultusEnabledPodsUp = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "multus_enabled_instance_up",
+			Help: "Metric to identify clusters with multus enabled instances.",
+		})
 )
 
-// UpdateNetDefMetrics
+// UpdateNetDefMetrics ...
 func UpdateNetDefMetrics(value float64) {
 	NetDefCounter.Add(value)
 }
 
-//UpdateMultusPodMetrics
+//UpdateMultusPodMetrics ...
 func UpdateMultusPodMetrics(value float64) {
 	MultusPodCounter.Add(value)
+	multusPodEnabledCount += value
+	if multusPodEnabledCount > 0.0 {
+		SetMultusEnabledPodUp(1.0)
+	} else {
+		SetMultusEnabledPodUp(0.0)
+	}
 }
 
-//SetMultusPodMetrics
-func SetMultusPodMetrics(value float64) {
-	MultusPodCounter.Set(value)
+//SetMultusEnabledPodUp ...
+func SetMultusEnabledPodUp(value float64) {
+	MultusEnabledPodsUp.Set(value)
 }

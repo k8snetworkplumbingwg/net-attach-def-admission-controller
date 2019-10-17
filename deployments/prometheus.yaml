@@ -1,4 +1,3 @@
-#Install Prometheus operator from operatorhub and run this under my-prometheus namespace
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -7,15 +6,17 @@ metadata:
     k8s-app: net-attach-def-admission-controller-sm
   name: net-attach-def-admission-sm
 spec:
+  jobLabel: NetworkAttachmentDefinition
   endpoints:
   - interval: 30s
     port: metrics
+    honorLabels: true
   selector:
     matchLabels:
       service: net-attach-def-admission-controller-service
   namespaceSelector: 
     matchNames:
-      - kube-system
+      - ${NAMESPACE}
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: Prometheus
@@ -25,10 +26,10 @@ metadata:
     prometheus: k8s
 spec:
   serviceAccountName: prometheus-k8s
-  serviceMonitorNamespaceSelector: 
+  serviceMonitorSelector: 
     matchExpressions:
-      - key : k8s-app
-        operator: Exists
+    - key : k8s-app
+      operator: Exists
   version: v1.3.0
 ---
 apiVersion: v1

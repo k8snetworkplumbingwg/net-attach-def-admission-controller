@@ -39,16 +39,11 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-const (
-	lMetricsAddress  = ":9091"
-	multusannotation = "k8s.v1.cni.cncf.io/networks"
-)
-
 func main() {
 	/* load configuration */
 	port := flag.Int("port", 443, "The port on which to serve.")
 	address := flag.String("bind-address", "0.0.0.0", "The IP address on which to listen for the --port port.")
-	metricsAddress := flag.String("metrics-listen-address", lMetricsAddress, "metrics server listen address.")
+	metricsAddress := flag.String("metrics-listen-address", ":9091", "metrics server listen address.")
 	cert := flag.String("tls-cert-file", "cert.pem", "File containing the default x509 Certificate for HTTPS.")
 	key := flag.String("tls-private-key-file", "key.pem", "File containing the default x509 private key matching --tls-cert-file.")
 	flag.Parse()
@@ -68,6 +63,8 @@ func main() {
 	// Register metrics
 	prometheus.MustRegister(localmetrics.NetDefCounter)
 	prometheus.MustRegister(localmetrics.MultusPodCounter)
+	prometheus.MustRegister(localmetrics.MultusEnabledPodsUp)
+
 	// Including these stats kills performance when Prometheus polls with multiple targets
 	prometheus.Unregister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	prometheus.Unregister(prometheus.NewGoCollector())
