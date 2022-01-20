@@ -19,14 +19,16 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/containernetworking/cni/libcni"
 	"github.com/golang/glog"
-	"github.com/intel/multus-cni/types"
 	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/pkg/errors"
+	"gopkg.in/intel/multus-cni.v3/pkg/types"
 	"k8s.io/api/admission/v1beta1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,6 +38,12 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+type NetConf struct {
+	types.NetConf
+	Master string `json:"master,omitempty"`
+	Vlan   int    `json:"vlan,omitempty"`
+}
+
 type jsonPatchOperation struct {
 	Operation string      `json:"op"`
 	Path      string      `json:"path"`
@@ -43,6 +51,7 @@ type jsonPatchOperation struct {
 }
 
 const (
+	nodeSelectorKey        = "k8s.v1.cni.cncf.io/nodeSelector"
 	networksAnnotationKey  = "k8s.v1.cni.cncf.io/networks"
 	networkResourceNameKey = "k8s.v1.cni.cncf.io/resourceName"
 	namespaceConstraint    = "_local"
@@ -81,6 +90,106 @@ func validateCNIConfig(config []byte) error {
 	return nil
 }
 
+//getInfraVlanData returns vlan ranges used by cloud infra-structure
+func getInfraVlanData() ([]int, error) {
+	var infraVlans []int
+
+	fs := os.Getenv("SRIOV_ON_NIC_1_ENABLED")
+	if fs == "" {
+		return infraVlans, nil
+	}
+	fv, err := strconv.ParseBool(fs)
+	if err != nil {
+		return infraVlans, err
+	}
+	if fv {
+		ds := os.Getenv("INFRA_VLAN_RANGE")
+		if ds == "" {
+			return infraVlans, nil
+		}
+		dv := strings.Split(ds, " ")
+		infraVlans = make([]int, len(dv))
+		for i := range dv {
+			infraVlans[i], _ = strconv.Atoi(dv[i])
+		}
+	}
+
+	return infraVlans, nil
+}
+
+// validateCNIConfigSriov verifies following fields
+// conf: 'vlan' and 'vlanTrunkString'
+func validateCNIConfigSriov(config []byte) error {
+	var c map[string]interface{}
+	if err := json.Unmarshal(config, &c); err != nil {
+		return err
+	}
+
+	if cniType, ok := c["type"]; ok {
+		if cniType == "sriov" {
+			infraVlans, err := getInfraVlanData()
+			if err != nil || len(infraVlans) == 0 {
+				return nil
+			}
+			vlan, vlanExists := c["vlan"]
+			vlanTrunk, vlanTrunkExists := c["vlan_trunk"]
+			if vlanExists && vlanTrunkExists {
+				return fmt.Errorf("both vlan and vlan_trunk fields are defined")
+			}
+			if !vlanExists && !vlanTrunkExists {
+				return fmt.Errorf("either vlan or vlan_trunk field should be defined")
+			}
+			if vlanExists {
+				vlanString := fmt.Sprintf("%v", vlan)
+				vlanId, err1 := strconv.Atoi(vlanString)
+				if err1 != nil {
+					return fmt.Errorf("vlan field format error")
+				}
+				for i := 0; i < len(infraVlans); i++ {
+					if infraVlans[i] == vlanId {
+						return fmt.Errorf("infrastructure vlan id %d shall not be used in vlan field", infraVlans[i])
+					}
+				}
+			}
+			if vlanTrunkExists {
+				vlanTrunkString := fmt.Sprintf("%v", vlanTrunk)
+				trunkingRanges := strings.Split(vlanTrunkString, ",")
+				for _, r := range trunkingRanges {
+					values := strings.Split(r, "-")
+					v1, err1 := strconv.Atoi(values[0])
+					v2, err2 := strconv.Atoi(values[len(values)-1])
+
+					if err1 != nil || err2 != nil {
+						return fmt.Errorf("vlan_trunk field format error")
+					}
+
+					if v1 > v2 || v1 < 1 || v2 > 4095 {
+						return fmt.Errorf("vlan_trunk field range error")
+					}
+
+					for i := 0; i < len(infraVlans); i++ {
+						if infraVlans[i] >= v1 && infraVlans[i] <= v2 {
+							return fmt.Errorf("infrastructure vlan id %d shall not be used in vlan_trunk field", infraVlans[i])
+						}
+					}
+				}
+			}
+			qos, qosExists := c["vlanQoS"]
+			if qosExists {
+				qosString := fmt.Sprintf("%v", qos)
+				qosId, err1 := strconv.Atoi(qosString)
+				if err1 != nil {
+					return fmt.Errorf("qos field format error")
+				}
+				if qosId != 0 {
+					return fmt.Errorf("qos %v is defined while only default qos (0) is allowed", qosId)
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // preprocessCNIConfig process CNI config bytes as following (that multus does too)
 // - if 'name' is missing, 'name' is filled
 func preprocessCNIConfig(name string, config []byte) ([]byte, error) {
@@ -100,18 +209,18 @@ func isJSON(s string) bool {
 	return json.Unmarshal([]byte(s), &js) == nil
 }
 
-func validateNetworkAttachmentDefinition(netAttachDef netv1.NetworkAttachmentDefinition) (bool, error) {
+func validateNetworkAttachmentDefinition(netAttachDef netv1.NetworkAttachmentDefinition) (bool, bool, error) {
 	nameRegex := `^[a-z-1-9]([-a-z0-9]*[a-z0-9])?$`
 	isNameCorrect, err := regexp.MatchString(nameRegex, netAttachDef.GetName())
 	if !isNameCorrect {
 		err := errors.New("net-attach-def name is invalid")
 		glog.Info(err)
-		return false, err
+		return false, false, err
 	}
 	if err != nil {
 		err := errors.New("error validating name")
 		glog.Error(err)
-		return false, err
+		return false, false, err
 	}
 
 	glog.Infof("validating network config spec: %s", netAttachDef.Spec.Config)
@@ -124,17 +233,22 @@ func validateNetworkAttachmentDefinition(netAttachDef netv1.NetworkAttachmentDef
 		if !isJSON(netAttachDef.Spec.Config) {
 			err := errors.New("configuration string is not in JSON format")
 			glog.Info(err)
-			return false, err
+			return false, false, err
 		}
 
 		confBytes, err = preprocessCNIConfig(netAttachDef.GetName(), []byte(netAttachDef.Spec.Config))
 		if err != nil {
 			err := errors.New("invalid json")
-			return false, err
+			return false, false, err
 		}
 		if err := validateCNIConfig(confBytes); err != nil {
 			err := errors.New("invalid config")
-			return false, err
+			return false, false, err
+		}
+		// additional validation on sriov type
+		if err := validateCNIConfigSriov(confBytes); err != nil {
+			err := errors.New(err.Error())
+			return false, false, err
 		}
 		_, err = libcni.ConfListFromBytes(confBytes)
 		if err != nil {
@@ -143,7 +257,7 @@ func validateNetworkAttachmentDefinition(netAttachDef netv1.NetworkAttachmentDef
 			if err != nil {
 				glog.Infof("spec is not a valid network config: %s", confBytes)
 				err := errors.New("invalid config")
-				return false, err
+				return false, false, err
 			}
 		}
 
@@ -151,8 +265,58 @@ func validateNetworkAttachmentDefinition(netAttachDef netv1.NetworkAttachmentDef
 		glog.Infof("Allowing empty spec.config")
 	}
 
+	// additional validation on ipvlan type
+	mutationRequired := validateCNIIpvlanConfig(netAttachDef)
+
 	glog.Infof("AdmissionReview request allowed: Network Attachment Definition '%s' is valid", confBytes)
-	return true, nil
+	return true, mutationRequired, nil
+}
+
+// validateCNIIpvlanConfig verifies following fields
+// conf: 'master' and 'vlan'
+// annotatoin: 'nodeSelector'
+func validateCNIIpvlanConfig(netAttachDef netv1.NetworkAttachmentDefinition) bool {
+	// Read NAD Config
+	var netConf NetConf
+	json.Unmarshal([]byte(netAttachDef.Spec.Config), &netConf)
+	// Check NAD type
+	if netConf.Type != "ipvlan" {
+		return false
+	}
+	if netConf.Vlan < 1 || netConf.Vlan > 4095 {
+		return false
+	}
+	// Check master is tenant-bond or provider-bond
+	if netConf.Master != "tenant-bond" && netConf.Master != "provider-bond" {
+		return false
+	}
+	// Check nodeSelector
+	annotationsMap := netAttachDef.GetAnnotations()
+	ns, ok := annotationsMap[nodeSelectorKey]
+	if !ok || len(ns) == 0 {
+		return false
+	}
+	glog.Info("mutation required")
+	return true
+}
+
+func mutateNetworkAttachmentDefinition(netAttachDef netv1.NetworkAttachmentDefinition, patch []jsonPatchOperation) []jsonPatchOperation {
+	// Read NAD Config
+	var netConf NetConf
+	json.Unmarshal([]byte(netAttachDef.Spec.Config), &netConf)
+	vlanIfName := netConf.Master + "." + strconv.Itoa(netConf.Vlan)
+	var c map[string]interface{}
+	json.Unmarshal([]byte(netAttachDef.Spec.Config), &c)
+	c["master"] = vlanIfName
+	configBytes, _ := json.Marshal(c)
+	netAttachDef.Spec.Config = string(configBytes)
+
+	patch = append(patch, jsonPatchOperation{
+		Operation: "replace",
+		Path:      "/spec/config",
+		Value:     netAttachDef.Spec.Config,
+	})
+	return patch
 }
 
 func prepareAdmissionReviewResponse(allowed bool, message string, ar *v1beta1.AdmissionReview) error {
@@ -412,7 +576,7 @@ func ValidateHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	/* perform actual object validation */
-	allowed, err := validateNetworkAttachmentDefinition(netAttachDef)
+	allowed, mutationRequired, err := validateNetworkAttachmentDefinition(netAttachDef)
 	if err != nil {
 		handleValidationError(w, ar, err)
 		return
@@ -424,6 +588,16 @@ func ValidateHandler(w http.ResponseWriter, req *http.Request) {
 		glog.Error(err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	if allowed && mutationRequired {
+		var patch []jsonPatchOperation
+		patch = mutateNetworkAttachmentDefinition(netAttachDef, patch)
+		ar.Response.Patch, _ = json.Marshal(patch)
+		ar.Response.PatchType = func() *v1beta1.PatchType {
+			pt := v1beta1.PatchTypeJSONPatch
+			return &pt
+		}()
+
 	}
 	writeResponse(w, ar)
 }

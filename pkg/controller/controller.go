@@ -15,6 +15,7 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -27,11 +28,11 @@ import (
 
 	"github.com/containernetworking/cni/libcni"
 	"github.com/golang/glog"
-	"github.com/intel/multus-cni/logging"
-	"github.com/intel/multus-cni/types"
-	"github.com/k8snetworkplumbingwg/net-attach-def-admission-controller/pkg/localmetrics"
 	networkv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	netattachdefClientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
+	"github.com/nokia/net-attach-def-admission-controller/pkg/localmetrics"
+	"gopkg.in/intel/multus-cni.v3/pkg/logging"
+	"gopkg.in/intel/multus-cni.v3/pkg/types"
 	api_v1 "k8s.io/api/core/v1"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -71,6 +72,9 @@ type Controller struct {
 	nadClientset *netattachdefClientset.Clientset
 }
 
+func StartWatchingHA() {
+}
+
 //StartWatching ...  Start prepares watchers and run their controllers, then waits for process termination signals
 func StartWatching() {
 	var clientset kubernetes.Interface
@@ -95,10 +99,10 @@ func StartWatching() {
 	informer := cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options meta_v1.ListOptions) (runtime.Object, error) {
-				return clientset.CoreV1().Pods(api_v1.NamespaceAll).List(options)
+				return clientset.CoreV1().Pods(api_v1.NamespaceAll).List(context.TODO(), options)
 			},
 			WatchFunc: func(options meta_v1.ListOptions) (watch.Interface, error) {
-				return clientset.CoreV1().Pods(api_v1.NamespaceAll).Watch(options)
+				return clientset.CoreV1().Pods(api_v1.NamespaceAll).Watch(context.TODO(), options)
 			},
 		},
 		&api_v1.Pod{},
@@ -274,7 +278,7 @@ func (c *Controller) processItem(key string) error {
 
 // find crd by name
 func (c *Controller) getCrdByName(name string, namespace string) (*networkv1.NetworkAttachmentDefinition, error) {
-	netAttachDef, err := c.nadClientset.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Get(name, meta_v1.GetOptions{})
+	netAttachDef, err := c.nadClientset.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Get(context.TODO(), name, meta_v1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("Failed to locate network attachment definition %s/%s", namespace, name)
 	}
