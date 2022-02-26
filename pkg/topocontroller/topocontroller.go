@@ -31,11 +31,6 @@ const (
 	controllerAgentName = "net-attach-def-topocontroller"
 )
 
-var (
-	// defines default resync period between k8s API server and controller
-	syncPeriod = time.Second * 600
-)
-
 type NetConf struct {
 	types.NetConf
 	Master string `json:"master,omitempty"`
@@ -59,7 +54,7 @@ type WorkItem struct {
 	newNad *netattachdef.NetworkAttachmentDefinition
 }
 
-// TopologyController is the controller implementation for handling net-attach-def resources and other objects using them
+// TopologyController is the controller implementation for FSS Operator
 type TopologyController struct {
 	vlanProvider          vlanprovider.VlanProvider
 	k8sClientSet          kubernetes.Interface
@@ -108,7 +103,7 @@ func NewTopologyController(
 }
 
 func (c *TopologyController) handleNodeUpdateEvent(oldObj, newObj interface{}) {
-	klog.V(3).Info("node add event received")
+	klog.V(3).Info("node update event received")
 	prev := oldObj.(metav1.Object)
 	cur := newObj.(metav1.Object)
 	if prev.GetResourceVersion() == cur.GetResourceVersion() {

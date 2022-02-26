@@ -32,22 +32,29 @@ type SriovSelectors struct {
 	PFNames      []string `json:"pfNames,omitempty"`
 }
 
-func createVlanInterface(vlanIfName string, vlanId int) error {
-	m := strings.Split(vlanIfName, ".")
-
-	// Check if vlan interface already exists
-	link, err := netlink.LinkByName(vlanIfName)
+func getVlanInterface(vlanIfName string) bool {
+	_, err := netlink.LinkByName(vlanIfName)
 	if err == nil {
-		return errors.New("requested vlan interface already exists")
+		return true
 	}
+	return false
+}
+
+func createVlanInterface(vlanIfName string, vlanId int) error {
+	// Check if vlan interface already exists
+	if getVlanInterface(vlanIfName) {
+		klog.Info("requested vlan interface already exists")
+		return nil
+	}
+	m := strings.Split(vlanIfName, ".")
 	// Check if vlanId is already used
 	vlanByOther := "vlan" + m[1]
-	_, err = netlink.LinkByName(vlanByOther)
+	_, err := netlink.LinkByName(vlanByOther)
 	if err == nil {
 		return errors.New("requested vlan is already used by other function")
 	}
 	// Check if master exists
-	link, err = netlink.LinkByName(m[0])
+	link, err := netlink.LinkByName(m[0])
 	if err != nil {
 		return err
 	}
@@ -94,9 +101,7 @@ func getNodeTopology(provider string) ([]byte, error) {
 	}
 	for _, link := range links {
 		bondName := ""
-		if link.Attrs().Name == "infra-bond" {
-			bondName = "infra-bond"
-		} else if link.Attrs().Name == "tenant-bond" {
+		if link.Attrs().Name == "tenant-bond" {
 			bondName = "tenant-bond"
 		} else if link.Attrs().Name == "provider-bond" {
 			bondName = "provider-bond"
@@ -108,9 +113,7 @@ func getNodeTopology(provider string) ([]byte, error) {
 	}
 	for _, link := range links {
 		bondName := ""
-		if bondIndex["infra-bond"] > 0 && link.Attrs().MasterIndex == bondIndex["infra-bond"] {
-			bondName = "infra-bond"
-		} else if bondIndex["tenant-bond"] > 0 && link.Attrs().MasterIndex == bondIndex["tenant-bond"] {
+		if bondIndex["tenant-bond"] > 0 && link.Attrs().MasterIndex == bondIndex["tenant-bond"] {
 			bondName = "tenant-bond"
 		} else if bondIndex["provider-bond"] > 0 && link.Attrs().MasterIndex == bondIndex["provider-bond"] {
 			bondName = "provider-bond"

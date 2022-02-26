@@ -17,10 +17,6 @@ import (
 	"github.com/nokia/net-attach-def-admission-controller/pkg/topocontroller"
 )
 
-const (
-	healthzPath = "/healthz"
-)
-
 var (
 	// defines default resync period between k8s API server and controller
 	syncPeriod = time.Second * 600

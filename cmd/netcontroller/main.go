@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"time"
 
+	coreSharedInformers "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog"
@@ -42,6 +43,7 @@ func main() {
 	}
 
 	netAttachDefInformerFactory := sharedInformers.NewSharedInformerFactory(netAttachDefClientSet, syncPeriod)
+	k8sInformerFactory := coreSharedInformers.NewSharedInformerFactory(k8sClientSet, syncPeriod)
 
 	nodeName := os.Getenv("NODE_NAME")
 
@@ -51,6 +53,7 @@ func main() {
 		k8sClientSet,
 		netAttachDefClientSet,
 		netAttachDefInformerFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions(),
+		k8sInformerFactory.Core().V1().Nodes(),
 	)
 
 	stopChan := make(chan struct{})
@@ -64,5 +67,6 @@ func main() {
 	}()
 
 	netAttachDefInformerFactory.Start(stopChan)
+	k8sInformerFactory.Start(stopChan)
 	networkController.Start(stopChan)
 }
