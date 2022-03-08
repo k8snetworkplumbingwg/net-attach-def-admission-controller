@@ -94,6 +94,8 @@ func getNodeTopology(provider string) ([]byte, error) {
 		SriovPools: make(map[string]map[string]map[string]interface{}),
 	}
 
+	name2nic := make(map[string]vlanprovider.Nic)
+	pci2nic := make(map[string]vlanprovider.Nic)
 	bondIndex := make(map[string]int)
 	links, err := netlink.LinkList()
 	if err != nil {
@@ -112,6 +114,10 @@ func getNodeTopology(provider string) ([]byte, error) {
 		}
 	}
 	for _, link := range links {
+		nic := vlanprovider.Nic{
+			Name:       link.Attrs().Name,
+			MacAddress: link.Attrs().HardwareAddr.String()}
+		name2nic[nic.Name] = nic
 		bondName := ""
 		if bondIndex["tenant-bond"] > 0 && link.Attrs().MasterIndex == bondIndex["tenant-bond"] {
 			bondName = "tenant-bond"
@@ -119,9 +125,6 @@ func getNodeTopology(provider string) ([]byte, error) {
 			bondName = "provider-bond"
 		}
 		if bondName != "" {
-			nic := vlanprovider.Nic{
-				Name:       link.Attrs().Name,
-				MacAddress: link.Attrs().HardwareAddr.String()}
 			var tmp []byte
 			tmp, _ = json.Marshal(nic)
 			var jsonString map[string]interface{}
@@ -139,29 +142,22 @@ func getNodeTopology(provider string) ([]byte, error) {
 		if err != nil {
 			klog.Errorf("Error when reading sriovdp config file %s", sriovConfigFile)
 		} else {
-			net, err := ghw.Network()
-			if err != nil {
-				return nil, err
-			}
-			pci2nic := make(map[string]vlanprovider.Nic)
-			name2nic := make(map[string]vlanprovider.Nic)
-			for _, nic := range net.NICs {
-				if nic.IsVirtual {
-					continue
+			if provider == "openstack" {
+				net, err := ghw.Network()
+				if err != nil {
+					return nil, err
 				}
-				if provider == "openstack" {
+				for _, nic := range net.NICs {
+					if nic.IsVirtual {
+						continue
+					}
 					if strings.HasPrefix(nic.Name, "eth") {
 						pci2nic[*nic.PCIAddress] = vlanprovider.Nic{
 							Name:       nic.Name,
 							MacAddress: nic.MacAddress}
 					}
-				} else {
-					name2nic[nic.Name] = vlanprovider.Nic{
-						Name:       nic.Name,
-						MacAddress: nic.MacAddress}
 				}
 			}
-
 			for _, resource := range resourceList.Resources {
 				topology.SriovPools[resource.ResourceName] = make(map[string]map[string]interface{})
 				if provider == "openstack" {

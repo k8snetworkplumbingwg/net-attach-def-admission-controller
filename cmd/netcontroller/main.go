@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	coreSharedInformers "k8s.io/client-go/informers"
@@ -23,7 +24,12 @@ var (
 )
 
 func main() {
-	var provider string
+	var (
+		provider string
+		nodeName = os.Getenv("NODE_NAME")
+	)
+
+	klog.InitFlags(nil)
 	flag.StringVar(&provider, "provider", "baremetal", "Only baremetal and openstack are supported.")
 	flag.Parse()
 
@@ -45,8 +51,6 @@ func main() {
 	netAttachDefInformerFactory := sharedInformers.NewSharedInformerFactory(netAttachDefClientSet, syncPeriod)
 	k8sInformerFactory := coreSharedInformers.NewSharedInformerFactory(k8sClientSet, syncPeriod)
 
-	nodeName := os.Getenv("NODE_NAME")
-
 	networkController := netcontroller.NewNetworkController(
 		provider,
 		nodeName,
@@ -58,7 +62,7 @@ func main() {
 
 	stopChan := make(chan struct{})
 	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt)
+	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 	go func() {
 		<-c
 		close(stopChan)

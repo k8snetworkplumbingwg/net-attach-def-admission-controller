@@ -42,10 +42,10 @@ type NadAction int
 const (
 	//Attach ... open vlan on switch
 	Attach NadAction = 1
-	//UpdateNodes ... nodes using vlan changed
-	UpdateNodes NadAction = 2
 	//Detach ... close vlan on switch
-	Detach NadAction = 3
+	Detach NadAction = 2
+	//AttachDetach ... nodes using vlan changed
+	AttachDetach NadAction = 3
 )
 
 type WorkItem struct {
@@ -67,6 +67,7 @@ type TopologyController struct {
 // NewTopologyController returns new TopologyController instance
 func NewTopologyController(
 	provider string,
+	nodeName string,
 	providerConfig string,
 	k8sClientSet kubernetes.Interface,
 	netAttachDefClientSet clientset.Interface,
@@ -97,7 +98,7 @@ func NewTopologyController(
 		UpdateFunc: TopologyController.handleNodeUpdateEvent,
 	})
 
-	klog.Infof("Start topocontroller for %T", vlanProvider)
+	klog.Infof("Start topocontroller on %s for %T", nodeName, vlanProvider)
 
 	return TopologyController
 }
@@ -139,29 +140,6 @@ func (c *TopologyController) handleNodeUpdateEvent(oldObj, newObj interface{}) {
 			return
 		}
 	}
-}
-
-func (c *TopologyController) handleNetAttachDefAddEvent(obj interface{}) {
-	klog.V(3).Info("net-attach-def add event received")
-	nad, ok := obj.(*netattachdef.NetworkAttachmentDefinition)
-	if !ok {
-		klog.Error("invalid API object received")
-		return
-	}
-	name := nad.ObjectMeta.Name
-	namespace := nad.ObjectMeta.Namespace
-	klog.Infof("handling addition of %s/%s", namespace, name)
-
-	// Check NAD for action
-	netConf, trigger := c.shouldTriggerAction(nad)
-	if !trigger {
-		klog.Infof("not an action triggering nad, ignored")
-		return
-	}
-	// Handle network attach
-	klog.Infof("Attach vlan interface of %s", netConf.Master)
-	workItem := WorkItem{action: Attach, newNad: nad}
-	c.workqueue.Add(workItem)
 }
 
 func (c *TopologyController) shouldTriggerAction(nad *netattachdef.NetworkAttachmentDefinition) (NetConf, bool) {
@@ -259,6 +237,29 @@ func (c *TopologyController) GetChangedNodes(oldNad, newNad *netattachdef.Networ
 	return nodesToDetach, nodesToAttach
 }
 
+func (c *TopologyController) handleNetAttachDefAddEvent(obj interface{}) {
+	klog.V(3).Info("net-attach-def add event received")
+	nad, ok := obj.(*netattachdef.NetworkAttachmentDefinition)
+	if !ok {
+		klog.Error("invalid API object received")
+		return
+	}
+	name := nad.ObjectMeta.Name
+	namespace := nad.ObjectMeta.Namespace
+	klog.Infof("handling addition of %s/%s", namespace, name)
+
+	// Check NAD for action
+	netConf, trigger := c.shouldTriggerAction(nad)
+	if !trigger {
+		klog.Infof("not an action triggering nad, ignored")
+		return
+	}
+	// Handle network attach
+	klog.Infof("Attach vlan interface of %s", netConf.Master)
+	workItem := WorkItem{action: Attach, newNad: nad}
+	c.workqueue.Add(workItem)
+}
+
 func (c *TopologyController) handleNetAttachDefUpdateEvent(oldObj, newObj interface{}) {
 	klog.V(3).Info("net-attach-def update event received")
 	prev := oldObj.(metav1.Object)
@@ -281,7 +282,7 @@ func (c *TopologyController) handleNetAttachDefUpdateEvent(oldObj, newObj interf
 	klog.Infof("handling update of %s/%s", namespace, name)
 
 	// Check NAD for action
-	oldNetConf, trigger1 := c.shouldTriggerAction(oldNad)
+	_, trigger1 := c.shouldTriggerAction(oldNad)
 	newNetConf, trigger2 := c.shouldTriggerAction(newNad)
 	if !trigger1 && !trigger2 {
 		return
@@ -296,14 +297,9 @@ func (c *TopologyController) handleNetAttachDefUpdateEvent(oldObj, newObj interf
 		klog.Error("should not happen: NAD changed to not action triggering, ignored")
 		return
 	}
-	// should not happen, give explicit error
-	if oldNetConf.Master != newNetConf.Master {
-		klog.Error("should not happen: master device changed from %s to %s, ignored", oldNetConf.Master, newNetConf.Master)
-		return
-	}
 	// Handle network change
 	klog.Infof("Update nodes using vlan interface of %s", newNetConf.Master)
-	workItem := WorkItem{action: UpdateNodes, oldNad: oldNad, newNad: newNad}
+	workItem := WorkItem{action: AttachDetach, oldNad: oldNad, newNad: newNad}
 	c.workqueue.Add(workItem)
 }
 
@@ -359,18 +355,18 @@ func (c *TopologyController) processItem(workItem WorkItem) error {
 	case Attach:
 		{
 			nodes := c.GetNodes(workItem.newNad)
-			return c.vlanProvider.Attach(networks, netConf.Vlan, nodes)
-		}
-	case UpdateNodes:
-		{
-			nodesToDetach, nodesToAttach := c.GetChangedNodes(workItem.oldNad, workItem.newNad)
-			c.vlanProvider.Detach("my-network", netConf.Vlan, nodesToDetach)
-			return c.vlanProvider.Attach(networks, netConf.Vlan, nodesToAttach)
+			c.vlanProvider.Attach(networks, netConf.Vlan, nodes)
 		}
 	case Detach:
 		{
 			nodes := c.GetNodes(workItem.newNad)
-			return c.vlanProvider.Detach(networks, netConf.Vlan, nodes)
+			c.vlanProvider.Detach(networks, netConf.Vlan, nodes)
+		}
+	case AttachDetach:
+		{
+			nodesToDetach, nodesToAttach := c.GetChangedNodes(workItem.oldNad, workItem.newNad)
+			c.vlanProvider.Detach("my-network", netConf.Vlan, nodesToDetach)
+			c.vlanProvider.Attach(networks, netConf.Vlan, nodesToAttach)
 		}
 	}
 	return nil

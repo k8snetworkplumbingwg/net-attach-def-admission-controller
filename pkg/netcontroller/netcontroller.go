@@ -385,7 +385,7 @@ func (c *NetworkController) Start(stopChan <-chan struct{}) {
 	klog.V(4).Infof("starting network controller")
 	defer c.workqueue.ShutDown()
 
-	if ok := cache.WaitForCacheSync(stopChan, c.netAttachDefsSynced); !ok {
+	if ok := cache.WaitForCacheSync(stopChan, c.netAttachDefsSynced, c.nodesSynced); !ok {
 		klog.Fatalf("failed waiting for caches to sync")
 	}
 
