@@ -209,7 +209,7 @@ func isJSON(s string) bool {
 	return json.Unmarshal([]byte(s), &js) == nil
 }
 
-func validateNetworkAttachmentDefinition(netAttachDef netv1.NetworkAttachmentDefinition) (bool, bool, error) {
+func validateNetworkAttachmentDefinition(operation v1beta1.Operation, netAttachDef netv1.NetworkAttachmentDefinition, oldNad netv1.NetworkAttachmentDefinition) (bool, bool, error) {
 	nameRegex := `^[a-z-1-9]([-a-z0-9]*[a-z0-9])?$`
 	isNameCorrect, err := regexp.MatchString(nameRegex, netAttachDef.GetName())
 	if !isNameCorrect {
@@ -266,8 +266,10 @@ func validateNetworkAttachmentDefinition(netAttachDef netv1.NetworkAttachmentDef
 	}
 
 	// additional validation on ipvlan type
-	mutationRequired := validateCNIIpvlanConfig(netAttachDef)
-
+	mutationRequired, err := validateCNIIpvlanConfig(operation, netAttachDef, oldNad)
+	if err != nil {
+		return false, false, err
+	}
 	glog.Infof("AdmissionReview request allowed: Network Attachment Definition '%s' is valid", confBytes)
 	return true, mutationRequired, nil
 }
@@ -275,29 +277,43 @@ func validateNetworkAttachmentDefinition(netAttachDef netv1.NetworkAttachmentDef
 // validateCNIIpvlanConfig verifies following fields
 // conf: 'master' and 'vlan'
 // annotatoin: 'nodeSelector'
-func validateCNIIpvlanConfig(netAttachDef netv1.NetworkAttachmentDefinition) bool {
+func shouldTriggerAction(netAttachDef netv1.NetworkAttachmentDefinition) (NetConf, bool) {
 	// Read NAD Config
 	var netConf NetConf
 	json.Unmarshal([]byte(netAttachDef.Spec.Config), &netConf)
 	// Check NAD type
 	if netConf.Type != "ipvlan" {
-		return false
+		return netConf, false
 	}
 	if netConf.Vlan < 1 || netConf.Vlan > 4095 {
-		return false
+		return netConf, false
 	}
 	// Check master is tenant-bond or provider-bond
 	if netConf.Master != "tenant-bond" && netConf.Master != "provider-bond" {
-		return false
+		return netConf, false
 	}
 	// Check nodeSelector
 	annotationsMap := netAttachDef.GetAnnotations()
 	ns, ok := annotationsMap[nodeSelectorKey]
 	if !ok || len(ns) == 0 {
-		return false
+		return netConf, false
 	}
-	glog.Info("mutation required")
-	return true
+	return netConf, true
+}
+
+func validateCNIIpvlanConfig(operation v1beta1.Operation, netAttachDef netv1.NetworkAttachmentDefinition, oldNad netv1.NetworkAttachmentDefinition) (bool, error) {
+	netConf, trigger1 := shouldTriggerAction(netAttachDef)
+	if trigger1 && operation == "UPDATE" {
+		oldConf, _ := shouldTriggerAction(oldNad)
+		if oldConf.Master == netConf.Master+"."+strconv.Itoa(netConf.Vlan) {
+			return true, nil
+		} else {
+			glog.Error("master and vlan field shall not change, you should delete and re-create")
+			return false, errors.New("IPVLAN master and vlan field change is not allowed")
+		}
+	}
+	glog.Infof("IPVLAN mutation required: %t", trigger1)
+	return trigger1, nil
 }
 
 func mutateNetworkAttachmentDefinition(netAttachDef netv1.NetworkAttachmentDefinition, patch []jsonPatchOperation) []jsonPatchOperation {
@@ -511,11 +527,15 @@ func parsePodNetworkObjectName(podnetwork string) (string, string, string, error
 	return netNsName, networkName, netIfName, nil
 }
 
-func deserializeNetworkAttachmentDefinition(ar *v1beta1.AdmissionReview) (netv1.NetworkAttachmentDefinition, error) {
+func deserializeNetworkAttachmentDefinition(ar *v1beta1.AdmissionReview) (netv1.NetworkAttachmentDefinition, netv1.NetworkAttachmentDefinition, error) {
 	/* unmarshal NetworkAttachmentDefinition from AdmissionReview request */
 	netAttachDef := netv1.NetworkAttachmentDefinition{}
+	oldNad := netv1.NetworkAttachmentDefinition{}
 	err := json.Unmarshal(ar.Request.Object.Raw, &netAttachDef)
-	return netAttachDef, err
+	if err == nil && ar.Request.Operation == "UPDATE" {
+		err = json.Unmarshal(ar.Request.OldObject.Raw, &oldNad)
+	}
+	return netAttachDef, oldNad, err
 }
 
 func handleValidationError(w http.ResponseWriter, ar *v1beta1.AdmissionReview, orgErr error) {
@@ -569,14 +589,14 @@ func ValidateHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	netAttachDef, err := deserializeNetworkAttachmentDefinition(ar)
+	netAttachDef, oldNad, err := deserializeNetworkAttachmentDefinition(ar)
 	if err != nil {
 		handleValidationError(w, ar, err)
 		return
 	}
 
 	/* perform actual object validation */
-	allowed, mutationRequired, err := validateNetworkAttachmentDefinition(netAttachDef)
+	allowed, mutationRequired, err := validateNetworkAttachmentDefinition(ar.Request.Operation, netAttachDef, oldNad)
 	if err != nil {
 		handleValidationError(w, ar, err)
 		return
