@@ -31,7 +31,8 @@ func main() {
 	var (
 		provider, providerConfig string
 		nodeName                 = os.Getenv("NODE_NAME")
-		nodeNamespace            = os.Getenv("POD_NAMESPACE")
+		podName                  = os.Getenv("POD_NAME")
+		podNamespace             = os.Getenv("POD_NAMESPACE")
 	)
 
 	klog.InitFlags(nil)
@@ -80,12 +81,12 @@ func main() {
 
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
-			Name:      "topocontroller",
-			Namespace: nodeNamespace,
+			Name:      "net-attach-def-topocontroller",
+			Namespace: podNamespace,
 		},
 		Client: k8sClientSet.CoordinationV1(),
 		LockConfig: resourcelock.ResourceLockConfig{
-			Identity: nodeName,
+			Identity: podName,
 		},
 	}
 
@@ -106,7 +107,7 @@ func main() {
 				klog.Info("stopped leading")
 			},
 			OnNewLeader: func(identity string) {
-				if identity == nodeName {
+				if identity == podName {
 					klog.Info("obtained leadership")
 					return
 				}

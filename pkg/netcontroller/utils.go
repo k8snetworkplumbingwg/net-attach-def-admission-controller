@@ -97,6 +97,8 @@ func getNodeTopology(provider string) ([]byte, error) {
 	name2nic := make(map[string]vlanprovider.Nic)
 	pci2nic := make(map[string]vlanprovider.Nic)
 	bondIndex := make(map[string]int)
+	bondIndex["tenant-bond"] = 0
+	bondIndex["provider-bond"] = 0
 	links, err := netlink.LinkList()
 	if err != nil {
 		return nil, err
@@ -129,7 +131,11 @@ func getNodeTopology(provider string) ([]byte, error) {
 			tmp, _ = json.Marshal(nic)
 			var jsonString map[string]interface{}
 			json.Unmarshal(tmp, &jsonString)
-			topology.Bonds[bondName][link.Attrs().HardwareAddr.String()] = jsonString
+			if provider == "openstack" {
+				topology.Bonds[bondName][nic.MacAddress] = jsonString
+			} else {
+				topology.Bonds[bondName][nic.Name] = jsonString
+			}
 		}
 	}
 
@@ -179,7 +185,7 @@ func getNodeTopology(provider string) ([]byte, error) {
 							tmp, _ = json.Marshal(nic)
 							var jsonString map[string]interface{}
 							json.Unmarshal(tmp, &jsonString)
-							topology.SriovPools[resource.ResourceName][nic.MacAddress] = jsonString
+							topology.SriovPools[resource.ResourceName][nic.Name] = jsonString
 						}
 					}
 				}
