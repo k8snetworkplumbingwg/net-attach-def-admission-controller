@@ -9,6 +9,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+        "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	coreInformers "k8s.io/client-go/informers/core/v1"
@@ -316,22 +317,28 @@ func (c *NetworkController) handleNodeUpdateEvent(oldObj, newObj interface{}) {
 }
 
 func (c *NetworkController) updateNadAnnotations(nad *netattachdef.NetworkAttachmentDefinition, status string) {
-	anno := nad.GetAnnotations()
-	if status == "deleted" {
-		_, ok := anno[c.nodeInfo.NodeName]
-		if !ok {
-			return
-		}
-		delete(anno, c.nodeInfo.NodeName)
-	} else {
-		anno[c.nodeInfo.NodeName] = status
-	}
-	nad.SetAnnotations(anno)
-	_, err := c.netAttachDefClientSet.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.ObjectMeta.Namespace).Update(context.TODO(), nad, metav1.UpdateOptions{})
-	if err != nil {
-		klog.Errorf("Update NAD annotaton failed because %s", err.Error())
-		return
-	}
+        for i := 0; i < 256; i++ {
+                nad, _ := c.netAttachDefClientSet.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.ObjectMeta.Namespace).Get(context.TODO(), nad.ObjectMeta.Name, metav1.GetOptions{})
+                anno := nad.GetAnnotations()
+                if status == "deleted" {
+                        _, ok := anno[c.nodeInfo.NodeName]
+                        if !ok {
+                                return
+                        }
+                        delete(anno, c.nodeInfo.NodeName)
+                } else {
+                        anno[c.nodeInfo.NodeName] = status
+                }
+                nad.SetAnnotations(anno)
+                _, err := c.netAttachDefClientSet.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.ObjectMeta.Namespace).Update(context.TODO(), nad, metav1.UpdateOptions{})
+                if err == nil {
+                        return
+                }
+                if !errors.IsConflict(err) {
+                        klog.Errorf("Update NAD annotaton failed because %s", err.Error())
+                        return
+                }
+        }
 }
 
 func (c *NetworkController) worker() {
