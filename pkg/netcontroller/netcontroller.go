@@ -316,29 +316,33 @@ func (c *NetworkController) handleNodeUpdateEvent(oldObj, newObj interface{}) {
 	}
 }
 
-func (c *NetworkController) updateNadAnnotations(nad *netattachdef.NetworkAttachmentDefinition, status string) {
+func (c *NetworkController) updateNadAnnotations(nad *netattachdef.NetworkAttachmentDefinition, status string) error {
         for i := 0; i < 256; i++ {
-                nad, _ := c.netAttachDefClientSet.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.ObjectMeta.Namespace).Get(context.TODO(), nad.ObjectMeta.Name, metav1.GetOptions{})
+                nad, err := c.netAttachDefClientSet.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.ObjectMeta.Namespace).Get(context.TODO(), nad.ObjectMeta.Name, metav1.GetOptions{})
+                if err != nil {
+                        return err
+                }
                 anno := nad.GetAnnotations()
                 if status == "deleted" {
                         _, ok := anno[c.nodeInfo.NodeName]
                         if !ok {
-                                return
+                                return nil
                         }
                         delete(anno, c.nodeInfo.NodeName)
                 } else {
                         anno[c.nodeInfo.NodeName] = status
                 }
                 nad.SetAnnotations(anno)
-                _, err := c.netAttachDefClientSet.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.ObjectMeta.Namespace).Update(context.TODO(), nad, metav1.UpdateOptions{})
+                _, err = c.netAttachDefClientSet.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.ObjectMeta.Namespace).Update(context.TODO(), nad, metav1.UpdateOptions{})
                 if err == nil {
-                        return
+                        return nil
                 }
                 if !errors.IsConflict(err) {
                         klog.Errorf("Update NAD annotaton failed because %s", err.Error())
-                        return
+                        return err
                 }
         }
+        return nil
 }
 
 func (c *NetworkController) worker() {

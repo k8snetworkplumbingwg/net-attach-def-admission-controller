@@ -36,7 +36,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-        "k8s.io/klog"
 )
 
 type NetConf struct {
@@ -293,8 +292,7 @@ func shouldTriggerAction(netAttachDef netv1.NetworkAttachmentDefinition) (NetCon
 	if netConf.Vlan < 1 || netConf.Vlan > 4095 {
 		return netConf, false, fmt.Errorf("ipvlan vlan value out of bound. Valid range 1..4095")
 	}
-        if  netConf.Master != "tenant-bond" && netConf.Master != "provider-bond" &&
-            !strings.HasPrefix(netConf.Master, "tenant-bond.") && !strings.HasPrefix(netConf.Master, "provider-bond."){
+        if !strings.HasPrefix(netConf.Master, "tenant-bond") && !strings.HasPrefix(netConf.Master, "provider-bond"){
                 return netConf, false, fmt.Errorf("ipvlan only support master with tenant-bond and provider-bond")
         }
 	// Check nodeSelector
@@ -349,7 +347,7 @@ func mutateNetworkAttachmentDefinition(netAttachDef netv1.NetworkAttachmentDefin
 	c["master"] = vlanIfName
 	configBytes, _ := json.Marshal(c)
 	netAttachDef.Spec.Config = string(configBytes)
-        klog.V(5).Info("Mutate: Network Attachment Definition '%s'", netAttachDef.Spec.Config)
+        glog.V(5).Info("Mutate: Network Attachment Definition '%s'", netAttachDef.Spec.Config)
 
 	patch = append(patch, jsonPatchOperation{
 		Operation: "replace",
