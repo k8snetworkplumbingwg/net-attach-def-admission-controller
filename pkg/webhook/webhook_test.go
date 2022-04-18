@@ -129,7 +129,7 @@ var _ = Describe("Webhook", func() {
 
 	DescribeTable("Network Attachment Definition validation",
 		func(in netv1.NetworkAttachmentDefinition, out bool, shouldFail bool) {
-			actualOut, _, err := validateNetworkAttachmentDefinition(in)
+			actualOut, err := validateNetworkAttachmentDefinition(in)
 			Expect(actualOut).To(Equal(out))
 			if shouldFail {
 				Expect(err).To(HaveOccurred())
