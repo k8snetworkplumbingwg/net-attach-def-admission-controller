@@ -27,9 +27,9 @@ import (
 	"time"
 
 	"github.com/golang/glog"
-	"github.com/nokia/net-attach-def-admission-controller/pkg/controller"
-	"github.com/nokia/net-attach-def-admission-controller/pkg/localmetrics"
-	"github.com/nokia/net-attach-def-admission-controller/pkg/webhook"
+	"github.com/k8snetworkplumbingwg/net-attach-def-admission-controller/pkg/controller"
+	"github.com/k8snetworkplumbingwg/net-attach-def-admission-controller/pkg/localmetrics"
+	"github.com/k8snetworkplumbingwg/net-attach-def-admission-controller/pkg/webhook"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -76,7 +76,7 @@ func main() {
 	startHTTPMetricServer(*metricsAddress)
 
 	//Start watching for pod creations
-	go controller.StartWatchingHA()
+	go controller.StartWatching()
 
 	go func() {
 		/* register handlers */
