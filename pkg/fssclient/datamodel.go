@@ -21,12 +21,12 @@ type Plugin struct {
 	ConnectType            string `json:"connectType"`
 	Name                   string `json:"name"`
 	SupportsNewDeployments bool   `json:"supportsNewDeployments"`
-	ExternalID             string `json:"externalId",omitempty`
 	ID                     string `json:"id"`
 	/*
-		APIKey           string `json:"apiKey",omitempty`
-		CallbackURL      string `json:"callbackUrl",omitempty`
-		PossibleSettings []struct {
+		ExternalID             string `json:"externalId",omitempty`
+		APIKey                 string `json:"apiKey",omitempty`
+		CallbackURL            string `json:"callbackUrl",omitempty`
+		PossibleSettings       []struct {
 			Description string `json:"description"`
 			Example     string `json:"example"`
 			Name        string `json:"name"`
@@ -38,12 +38,12 @@ type Plugin struct {
 
 type Deployments []Deployment
 type Deployment struct {
-	AdminUp    bool   `json:"adminUp"`
-	Name       string `json:"name"`
-	PluginID   string `json:"pluginID"`
-	ExternalID string `json:"externalId",omitempty`
-	ID         string `json:"id"`
+	AdminUp  bool   `json:"adminUp"`
+	Name     string `json:"name"`
+	PluginID string `json:"pluginID"`
+	ID       string `json:"id"`
 	/*
+		ExternalID  string `json:"externalId",omitempty`
 		Description string `json:"description",omitempty`
 		Settings    struct {
 			Password string `json:"password"`

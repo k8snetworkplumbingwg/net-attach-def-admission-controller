@@ -3,6 +3,7 @@ package fssclient
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -57,12 +58,12 @@ func (f *FssClient) GetAccessToken() error {
 	now := time.Now()
 	// Check if accessToken expiried
 	if now.After(f.accessTokenExpiry) {
-		klog.Info("access_token expired, refresh it")
+		klog.V(3).Info("access_token expired, refresh it")
 		return f.login(f.refreshURL)
 	}
 	// Check if refreshToken expiried
 	if now.After(f.refreshTokenExpiry) {
-		klog.Info("refresh_token expired, login again")
+		klog.V(3).Info("refresh_token expired, login again")
 		return f.login(f.cfg.AuthURL)
 	}
 	return nil
@@ -79,7 +80,10 @@ func (f *FssClient) GET(path string) (int, []byte, error) {
 		return 0, nil, err
 	}
 	request.Header.Add("Authorization", "Bearer "+f.loginResponse.AccessToken)
-	client := &http.Client{}
+	transCfg := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // ignore expired SSL certificates
+	}
+	client := &http.Client{Transport: transCfg}
 	response, err := client.Do(request)
 	if err != nil {
 		return 0, nil, err
@@ -103,7 +107,10 @@ func (f *FssClient) DELETE(path string) (int, []byte, error) {
 		return 0, nil, err
 	}
 	request.Header.Add("Authorization", "Bearer "+f.loginResponse.AccessToken)
-	client := &http.Client{}
+	transCfg := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // ignore expired SSL certificates
+	}
+	client := &http.Client{Transport: transCfg}
 	response, err := client.Do(request)
 	defer response.Body.Close()
 	jsonRespData, err := ioutil.ReadAll(response.Body)
@@ -129,7 +136,10 @@ func (f *FssClient) POST(path string, jsonReqData []byte) (int, []byte, error) {
 	}
 	request.Header.Set("Content-Type", "application/json; charset=UTF-8")
 	request.Header.Add("Authorization", "Bearer "+f.loginResponse.AccessToken)
-	client := &http.Client{}
+	transCfg := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // ignore expired SSL certificates
+	}
+	client := &http.Client{Transport: transCfg}
 	response, err := client.Do(request)
 	if err != nil {
 		return 0, nil, err
@@ -190,7 +200,10 @@ func (f *FssClient) login(loginURL string) error {
 	if loginURL == f.refreshURL {
 		request.Header.Add("Authorization", "Bearer "+f.loginResponse.AccessToken)
 	}
-	client := &http.Client{}
+	transCfg := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // ignore expired SSL certificates
+	}
+	client := &http.Client{Transport: transCfg}
 	response, err := client.Do(request)
 	if err != nil {
 		return err
@@ -314,8 +327,7 @@ func NewFssClient(k8sClientSet kubernetes.Interface, podNamespace string, cfg *A
 		f.plugin = Plugin{
 			ConnectType:            "kubernetes",
 			Name:                   "ncs-" + cfg.Clustername,
-			SupportsNewDeployments: true,
-			ExternalID:             "ncs-" + cfg.Clustername,
+			SupportsNewDeployments: false,
 		}
 		jsonRequest, _ := json.Marshal(f.plugin)
 		statusCode, jsonResponse, err := f.POST(pluginPath, jsonRequest)
@@ -335,58 +347,52 @@ func NewFssClient(k8sClientSet kubernetes.Interface, podNamespace string, cfg *A
 		if err != nil {
 			return nil, err
 		}
-		if !hasDeployment {
-			f.deployment = Deployment{
-				AdminUp:    false,
-				Name:       "ncs-" + cfg.Clustername,
-				PluginID:   f.plugin.ID,
-				ExternalID: "ncs-" + cfg.Clustername,
+	}
+	// Create deployment
+	if !hasDeployment {
+		f.deployment = Deployment{
+			AdminUp:  false,
+			Name:     "ncs-" + cfg.Clustername,
+			PluginID: f.plugin.ID,
+		}
+		jsonRequest, _ := json.Marshal(f.deployment)
+		statusCode, jsonResponse, err := f.POST(deploymentPath, jsonRequest)
+		if err != nil {
+			return nil, err
+		}
+		if statusCode != 201 {
+			var errorResponse ErrorResponse
+			json.Unmarshal(jsonResponse, &errorResponse)
+			klog.Errorf("Deployment error: %+v", errorResponse)
+			return nil, fmt.Errorf("Create deployment failed with code %d", statusCode)
+		}
+		json.Unmarshal(jsonResponse, &f.deployment)
+		klog.Infof("Deployment created: %+v", f.deployment)
+		jsonString, _ := json.Marshal(f.deployment)
+		err = f.setConfigMap("deployment", jsonString)
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Wait Admin set adminUp to true
+	if !f.deployment.AdminUp {
+		klog.Infof("Wait Admin set adminUp to true for plugin %s deployment %s...", f.plugin.ID, f.deployment.ID)
+		path := deploymentPath + "/" + f.deployment.ID
+		for !f.deployment.AdminUp {
+			time.Sleep(10 * time.Second)
+			statusCode, jsonResponse, err := f.GET(path)
+			if err != nil || statusCode != 200 {
+				return nil, fmt.Errorf("Get deployment failed: %s", err.Error())
 			}
-			/*
-				// Create deployment is allowed with admin API only
-				jsonRequest, _ = json.Marshal(f.deployment)
-				statusCode, jsonResponse, err = f.POST(deploymentPath, jsonRequest)
-				if err != nil {
-					return nil, err
-				}
-				if statusCode != 201 {
-					var errorResponse ErrorResponse
-					json.Unmarshal(jsonResponse, &errorResponse)
-					klog.Errorf("Deployment error: %+v", errorResponse)
-					return nil, fmt.Errorf("Create deployment failed with code %d", statusCode)
-				}
-				json.Unmarshal(jsonResponse, &f.deployment)
-				klog.Infof("Deployment created: %+v", f.deployment)
-				jsonString, _ = json.Marshal(f.deployment)
+			json.Unmarshal(jsonResponse, &f.deployment)
+			if f.deployment.AdminUp {
+				klog.Infof("Deployment is ready: %+v", f.deployment)
+				jsonString, _ := json.Marshal(f.deployment)
 				err = f.setConfigMap("deployment", jsonString)
 				if err != nil {
 					return nil, err
 				}
-			*/
-		}
-	}
-	// Wait Admin to create deployment
-	if !f.deployment.AdminUp {
-		klog.Infof("Wait Admin to create deployment for plugin %s...", f.plugin.ID)
-		for !f.deployment.AdminUp {
-			time.Sleep(10 * time.Second)
-			statusCode, jsonResponse, err := f.GET(deploymentPath)
-			if err != nil || statusCode != 200 {
-				return nil, fmt.Errorf("Get deployments failed: %s", err.Error())
-			}
-			var deployments Deployments
-			json.Unmarshal(jsonResponse, &deployments)
-			for _, v := range deployments {
-				if v.PluginID == f.plugin.ID {
-					klog.Infof("Deployment is create: %+v", v)
-					f.deployment = v
-					jsonString, _ := json.Marshal(f.deployment)
-					err = f.setConfigMap("deployment", jsonString)
-					if err != nil {
-						return nil, err
-					}
-					break
-				}
+				break
 			}
 		}
 	}
