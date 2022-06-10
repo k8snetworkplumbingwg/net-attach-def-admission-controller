@@ -26,6 +26,7 @@ type AuthOpts struct {
 	Password    string
 	Clustername string `gcfg:"cluster-name"`
 	Restartmode string `gcfg:"restart-mode"`
+	Insecure    bool
 }
 
 type FssClient struct {
@@ -80,10 +81,13 @@ func (f *FssClient) GET(path string) (int, []byte, error) {
 		return 0, nil, err
 	}
 	request.Header.Add("Authorization", "Bearer "+f.loginResponse.AccessToken)
-	transCfg := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // ignore expired SSL certificates
+	client := &http.Client{}
+	if f.cfg.Insecure {
+		transCfg := &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // ignore SSL certificates
+		}
+		client.Transport = transCfg
 	}
-	client := &http.Client{Transport: transCfg}
 	response, err := client.Do(request)
 	if err != nil {
 		return 0, nil, err
@@ -107,10 +111,13 @@ func (f *FssClient) DELETE(path string) (int, []byte, error) {
 		return 0, nil, err
 	}
 	request.Header.Add("Authorization", "Bearer "+f.loginResponse.AccessToken)
-	transCfg := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // ignore expired SSL certificates
+	client := &http.Client{}
+	if f.cfg.Insecure {
+		transCfg := &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // ignore SSL certificates
+		}
+		client.Transport = transCfg
 	}
-	client := &http.Client{Transport: transCfg}
 	response, err := client.Do(request)
 	defer response.Body.Close()
 	jsonRespData, err := ioutil.ReadAll(response.Body)
@@ -136,10 +143,13 @@ func (f *FssClient) POST(path string, jsonReqData []byte) (int, []byte, error) {
 	}
 	request.Header.Set("Content-Type", "application/json; charset=UTF-8")
 	request.Header.Add("Authorization", "Bearer "+f.loginResponse.AccessToken)
-	transCfg := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // ignore expired SSL certificates
+	client := &http.Client{}
+	if f.cfg.Insecure {
+		transCfg := &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // ignore SSL certificates
+		}
+		client.Transport = transCfg
 	}
-	client := &http.Client{Transport: transCfg}
 	response, err := client.Do(request)
 	if err != nil {
 		return 0, nil, err
@@ -200,10 +210,13 @@ func (f *FssClient) login(loginURL string) error {
 	if loginURL == f.refreshURL {
 		request.Header.Add("Authorization", "Bearer "+f.loginResponse.AccessToken)
 	}
-	transCfg := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // ignore expired SSL certificates
+	client := &http.Client{}
+	if f.cfg.Insecure {
+		transCfg := &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // ignore SSL certificates
+		}
+		client.Transport = transCfg
 	}
-	client := &http.Client{Transport: transCfg}
 	response, err := client.Do(request)
 	if err != nil {
 		return err

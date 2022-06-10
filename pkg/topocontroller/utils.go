@@ -297,7 +297,7 @@ func (c *TopologyController) handleNetworkDetach(nad *netattachdef.NetworkAttach
 		klog.Errorf("Plugin Detach for vlan %v failed: %s", vlanIds, err.Error())
 	}
 
-	if action == datatypes.DeleteDetach {
+	if action != datatypes.DeleteDetach {
 		nodesAttached := []string{}
 		nodesAttachFailed := []string{}
 		c.updateNadAnnotations(nad, nodesAttached, nodesAttachFailed, nodesDetached)

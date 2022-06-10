@@ -340,6 +340,7 @@ func (c *TopologyController) handleNetAttachDefUpdateEvent(oldObj, newObj interf
 	// Check NAD for action
 	oldNetConf, trigger1 := c.shouldTriggerAction(oldNad)
 	newNetConf, trigger2 := c.shouldTriggerAction(newNad)
+	klog.Infof("trigger1=%t, trigger2=%t", trigger1, trigger2)
 	if !trigger1 && !trigger2 {
 		return
 	}
@@ -386,9 +387,10 @@ func (c *TopologyController) handleNetAttachDefUpdateEvent(oldObj, newObj interf
 	}
 	if net1 != net2 {
 		klog.Errorf("NAD network change is not supported")
+		return
 	}
 	if ns1 == ns2 {
-		klog.V(3).Info("nodeSelector is not changed")
+		klog.Info("nodeSelector is not changed")
 		return
 	}
 	workItem := WorkItem{action: datatypes.UpdateAttachDetach, oldNad: oldNad, newNad: newNad}
