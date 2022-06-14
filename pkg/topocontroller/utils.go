@@ -282,7 +282,7 @@ func (c *TopologyController) handleNetworkDetach(nad *netattachdef.NetworkAttach
 			}
 		}
 	}
-	if len(nodesInfo) == 0 {
+	if action == datatypes.UpdateDetach && len(nodesInfo) == 0 {
 		klog.Infof("Skip the DETACH procedure: no candidate node found for %s/%s", namespace, name)
 		return nil
 	}
@@ -334,11 +334,11 @@ func (c *TopologyController) processNadItem(workItem WorkItem) error {
 				klog.Errorf("Get matching nodes failed: %s", err.Error())
 				return err
 			}
-			if len(nodes.Items) == 0 {
+			if workItem.action == datatypes.UpdateDetach && len(nodes.Items) == 0 {
 				klog.Infof("No matching node found")
 				return nil
 			}
-			err = c.handleNetworkDetach(workItem.newNad, nodes.Items, workItem.action)
+			err = c.handleNetworkDetach(workItem.oldNad, nodes.Items, workItem.action)
 			if err != nil {
 				klog.Errorf("handleNetworkDetach failed because %s", err.Error())
 			}

@@ -312,7 +312,7 @@ func (c *TopologyController) handleNetAttachDefDeleteEvent(obj interface{}) {
 		return
 	}
 	// Handle network detach
-	workItem := WorkItem{action: datatypes.DeleteDetach, newNad: nad}
+	workItem := WorkItem{action: datatypes.DeleteDetach, oldNad: nad, newNad: nad}
 	c.workqueue.Add(workItem)
 }
 

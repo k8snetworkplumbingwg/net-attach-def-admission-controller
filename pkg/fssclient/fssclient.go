@@ -221,13 +221,16 @@ func (f *FssClient) login(loginURL string) error {
 	if err != nil {
 		return err
 	}
-	if response.StatusCode != 200 {
-		return fmt.Errorf("Login failed with code %d", response.StatusCode)
-	}
 	defer response.Body.Close()
 	jsonRespData, err := ioutil.ReadAll(response.Body)
 	if err != nil {
 		return err
+	}
+	if response.StatusCode != 200 {
+		var errorResponse ErrorResponse
+		json.Unmarshal(jsonRespData, &errorResponse)
+		klog.Errorf("Login error: %+v", errorResponse)
+		return fmt.Errorf("Login failed with code %d", response.StatusCode)
 	}
 	var result LoginResponse
 	err = json.Unmarshal(jsonRespData, &result)
