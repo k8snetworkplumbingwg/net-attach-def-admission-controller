@@ -2,6 +2,7 @@ package vlanprovider
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 
@@ -58,7 +59,7 @@ func (p *FssVlanProvider) Attach(fssWorkloadEvpnId string, fssSubnetId string, v
 	}
 	for _, vlanId := range vlanIds {
 		klog.Infof("Attach step 1: get hostPortLabel for vlan %d on fssWorkloadEvpnId %s fssSubnetId %s", vlanId, fssWorkloadEvpnId, fssSubnetId)
-		hostPortLabelID, err := p.fssClient.GetSubnetInterface(fssWorkloadEvpnId, fssSubnetId, vlanId)
+		hostPortLabelID, err := p.fssClient.CreateSubnetInterface(fssWorkloadEvpnId, fssSubnetId, vlanId)
 		if err != nil {
 			return nodesStatus, err
 		}
@@ -92,13 +93,13 @@ func (p *FssVlanProvider) Detach(fssWorkloadEvpnId string, fssSubnetId string, v
 	}
 	for _, vlanId := range vlanIds {
 		klog.Infof("Detach step 1: get hostPortLabel for vlan %d on fssWorkloadEvpnId %s fssSubnetId %s", vlanId, fssWorkloadEvpnId, fssSubnetId)
-		hostPortLabelID, err := p.fssClient.GetSubnetInterface(fssWorkloadEvpnId, fssSubnetId, vlanId)
-		if err != nil {
-			return nodesStatus, err
+		hostPortLabelID, exists := p.fssClient.GetSubnetInterface(fssWorkloadEvpnId, fssSubnetId, vlanId)
+		if !exists {
+			return nodesStatus, fmt.Errorf("Reqeusted vlan %d does not exist", vlanId)
 		}
 		if requestType == datatypes.DeleteDetach || requestType == datatypes.UpdateDetach {
 			klog.Infof("Detach step 2: delete vlan %d on fssSubnetId %s", vlanId, fssSubnetId)
-			err = p.fssClient.DeleteSubnetInterface(fssSubnetId, vlanId, hostPortLabelID)
+			err := p.fssClient.DeleteSubnetInterface(fssSubnetId, vlanId, hostPortLabelID)
 			if err != nil {
 				return nodesStatus, err
 			}

@@ -552,7 +552,7 @@ func (f *FssClient) Resync(deploymentID string) error {
 	return nil
 }
 
-func (f *FssClient) GetSubnetInterface(fssWorkloadEvpnId string, fssSubnetId string, vlanId int) (string, error) {
+func (f *FssClient) CreateSubnetInterface(fssWorkloadEvpnId string, fssSubnetId string, vlanId int) (string, error) {
 	hostPortLabelID := ""
 	tenant, ok1 := f.database.tenants[fssWorkloadEvpnId]
 	if !ok1 {
@@ -633,6 +633,23 @@ func (f *FssClient) GetSubnetInterface(fssWorkloadEvpnId string, fssSubnetId str
 	klog.Infof("HostPortLabel is created: %+v", hostPortLabel)
 	f.database.hostPortLabels[fssSubnetId][vlanId] = hostPortLabel.ID
 	return hostPortLabel.ID, nil
+}
+
+func (f *FssClient) GetSubnetInterface(fssWorkloadEvpnId string, fssSubnetId string, vlanId int) (string, bool) {
+	_, ok := f.database.tenants[fssWorkloadEvpnId]
+	if !ok {
+		return "", false
+	}
+	_, ok = f.database.subnets[fssSubnetId]
+	if !ok {
+		return "", false
+	}
+	hostPortLabels := f.database.hostPortLabels[fssSubnetId]
+	hostPortLabelID, ok := hostPortLabels[vlanId]
+	if !ok {
+		return "", false
+	}
+	return hostPortLabelID, true
 }
 
 func (f *FssClient) AttachSubnetInterface(fssSubnetId string, vlanId int, hostPortLabelID string) error {
