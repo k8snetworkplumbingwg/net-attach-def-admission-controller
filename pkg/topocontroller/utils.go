@@ -100,6 +100,12 @@ func (c *TopologyController) updateNadAnnotations(nad *netattachdef.NetworkAttac
 					if !nodeExists {
 						networkStatus["attached"] = append(networkStatus["attached"], n)
 					}
+					for k, w := range networkStatus["attachment-failed"] {
+						if n == w {
+							networkStatus["attachment-failed"] = append(networkStatus["attachment-failed"][:k], networkStatus["attachment-failed"][k+1:]...)
+							break
+						}
+					}
 				}
 			}
 			if len(nodesAttachFailed) > 0 {
@@ -113,6 +119,12 @@ func (c *TopologyController) updateNadAnnotations(nad *netattachdef.NetworkAttac
 					}
 					if !nodeExists {
 						networkStatus["attachment-failed"] = append(networkStatus["attachment-failed"], n)
+					}
+					for k, w := range networkStatus["attached"] {
+						if n == w {
+							networkStatus["attached"] = append(networkStatus["attached"][:k], networkStatus["attached"][k+1:]...)
+							break
+						}
 					}
 				}
 			}
@@ -307,11 +319,11 @@ func (c *TopologyController) handleNetworkDetach(nad *netattachdef.NetworkAttach
 
 func (c *TopologyController) processNadItem(workItem WorkItem) error {
 	klog.Infof("processNadItem invoked for %s/%s", workItem.newNad.ObjectMeta.Name, workItem.newNad.ObjectMeta.Namespace)
-	annotationsMap := workItem.newNad.GetAnnotations()
-	ns, _ := annotationsMap[datatypes.NodeSelectorKey]
 	switch workItem.action {
 	case datatypes.CreateAttach, datatypes.UpdateAttach:
 		{
+			annotationsMap := workItem.newNad.GetAnnotations()
+			ns, _ := annotationsMap[datatypes.NodeSelectorKey]
 			nodes, err := c.k8sClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{LabelSelector: ns})
 			if err != nil {
 				klog.Errorf("Get matching nodes failed: %s", err.Error())
@@ -329,6 +341,8 @@ func (c *TopologyController) processNadItem(workItem WorkItem) error {
 		}
 	case datatypes.DeleteDetach, datatypes.UpdateDetach:
 		{
+			annotationsMap := workItem.oldNad.GetAnnotations()
+			ns, _ := annotationsMap[datatypes.NodeSelectorKey]
 			nodes, err := c.k8sClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{LabelSelector: ns})
 			if err != nil {
 				klog.Errorf("Get matching nodes failed: %s", err.Error())
@@ -346,6 +360,7 @@ func (c *TopologyController) processNadItem(workItem WorkItem) error {
 		}
 	case datatypes.UpdateAttachDetach:
 		{
+			annotationsMap := workItem.oldNad.GetAnnotations()
 			var networkStatus NetworkStatus
 			networkStatus = make(map[string][]string)
 			jsonString, ok := annotationsMap[datatypes.NetworkStatusKey]
@@ -369,7 +384,7 @@ func (c *TopologyController) processNadItem(workItem WorkItem) error {
 					}
 				}
 				if len(nodesToDetach) > 0 {
-					err := c.handleNetworkDetach(workItem.newNad, nodesToDetach, workItem.action)
+					err := c.handleNetworkDetach(workItem.oldNad, nodesToDetach, workItem.action)
 					if err != nil {
 						klog.Errorf("handleNetworkDetach failed because %s", err.Error())
 					}

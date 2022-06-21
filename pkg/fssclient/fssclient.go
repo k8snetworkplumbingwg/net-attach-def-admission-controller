@@ -57,15 +57,15 @@ const (
 
 func (f *FssClient) GetAccessToken() error {
 	now := time.Now()
+	// Check if refreshToken expiried
+        if now.After(f.refreshTokenExpiry) {
+                klog.V(3).Info("refresh_token expired, login again")
+                return f.login(f.cfg.AuthURL)
+        }
 	// Check if accessToken expiried
 	if now.After(f.accessTokenExpiry) {
 		klog.V(3).Info("access_token expired, refresh it")
 		return f.login(f.refreshURL)
-	}
-	// Check if refreshToken expiried
-	if now.After(f.refreshTokenExpiry) {
-		klog.V(3).Info("refresh_token expired, login again")
-		return f.login(f.cfg.AuthURL)
 	}
 	return nil
 }
