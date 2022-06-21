@@ -42,6 +42,7 @@ type NetConf struct {
 	types.NetConf
 	Master string `json:"master,omitempty"`
 	Vlan   int    `json:"vlan,omitempty"`
+	VlanTrunk string `json:"vlan_trunk,omitempty"
 }
 
 type jsonPatchOperation struct {
@@ -54,6 +55,8 @@ const (
 	nodeSelectorKey        = "k8s.v1.cni.cncf.io/nodeSelector"
 	networksAnnotationKey  = "k8s.v1.cni.cncf.io/networks"
 	networkResourceNameKey = "k8s.v1.cni.cncf.io/resourceName"
+	extNetworkIDKey        = "nokia.com/extNetworkID"
+	extProjectIDKey        = "nokia.com/extProjectID"
 	namespaceConstraint    = "_local"
 )
 
@@ -267,6 +270,11 @@ func validateNetworkAttachmentDefinition(operation v1beta1.Operation, netAttachD
                         err := errors.New(err.Error())
                         return false, false, err
                 }
+		// validate for Fabric Operator
+		if err := validateForFabricOperator(operation, netAttachDef, oldNad); err != nil {
+			err := errors.New(err.Error())
+			return false, false, err
+		}
                 mutationRequired = mutate
 	} else {
 		glog.Infof("Allowing empty spec.config")
@@ -294,7 +302,7 @@ func isVlanOperatorRequired(netAttachDef netv1.NetworkAttachmentDefinition) (boo
                 }
         }
 
-        return false;
+        return false
 }
 
 func shouldTriggerMutation(netAttachDef netv1.NetworkAttachmentDefinition) (NetConf, bool, error) {
@@ -359,6 +367,86 @@ func validateCNIIpvlanConfig(operation v1beta1.Operation, netAttachDef netv1.Net
 
 	return mutationRequired, nil
 }
+
+func isFabricOperatorRequired(netAttachDef netv1.NetworkAttachmentDefinition) (bool) {
+        // Check nodeSelector
+        annotationsMap := netAttachDef.GetAnnotations()
+        ns, ok := annotationsMap[nodeSelectorKey]
+        if !ok || len(ns) == 0 {
+                return false
+        }
+        // Check extProjectID
+        project, ok := annotationsMap[extProjectIDKey]
+        if !ok || len(project) == 0 {
+                return false
+        }
+        // Check extNetworkID
+        network, ok := annotationsMap[extNetworkIDKey]
+        if !ok || len(network) == 0 {
+                return false
+        }
+
+        return true
+}
+
+// validateForFabricOperator verifies following fields
+// annotatoin: 'nodeSelector', 'extNetworkID', 'extProjectID' and 'resourceName'
+// conf: 'type', 'vlan' and 'vlan_trunk'
+// return err for validation error
+func validateForFabricOperator(operation v1beta1.Operation, netAttachDef netv1.NetworkAttachmentDefinition, oldNad netv1.NetworkAttachmentDefinition) (error) {
+        //skip checking if Fabric operator is not required
+        if !isFabricOperatorRequired(netAttachDef) && !isFabricOperatorRequired(oldNad) {
+                return nil
+        }
+
+        var netConf NetConf
+        json.Unmarshal([]byte(netAttachDef.Spec.Config), &netConf)
+        annotationsMap := netAttachDef.GetAnnotations()
+        proj, _ := annotationsMap[extProjectIDKey]
+        net, _ := annotationsMap[extNetworkIDKey]
+
+        resourceName, ok := annotationsMap[networkResourceNameKey]
+        if "sriov" == netConf.Type {
+                if !ok || len(resourceName) == 0 {
+                        return fmt.Errorf("Nokia Proprietary  SRIOV NAD requires resource name")
+                }
+        }
+
+        //now check for update
+        if operation != "UPDATE" {
+                return nil
+        }
+
+        var oldNetConf NetConf
+        json.Unmarshal([]byte(oldNad.Spec.Config), &oldNetConf)
+        // Handle network change
+        if oldNetConf.Type != netConf.Type {
+                return fmt.Errorf("Nokia proprietary NAD type change is not support")
+        }
+        if oldNetConf.Vlan > 0 && oldNetConf.Vlan != netConf.Vlan {
+                return fmt.Errorf("Nokia proprietary NAD vlan change is not supported")
+        }
+        if oldNetConf.Vlan == 0 && oldNetConf.VlanTrunk != netConf.VlanTrunk {
+                return fmt.Errorf("Nokia proprietary SRIOV NAD vlan_trunk change is not supported")
+        }
+        oldAnnotationsMap := oldNad.GetAnnotations()
+        oldProj, _ := oldAnnotationsMap[extProjectIDKey]
+        oldNet, _ := oldAnnotationsMap[extNetworkIDKey]
+        if oldProj != proj {
+                return fmt.Errorf("Nokia proprietary NAD project change is not supported")
+        }
+        if oldNet != net {
+                return fmt.Errorf("Nokia proprietary NAD network change is not supported")
+        }
+        if "sriov" == oldNetConf.Type {
+                oldResourceName, _ := oldAnnotationsMap[networkResourceNameKey]
+                if oldResourceName != resourceName {
+                        return fmt.Errorf("Nokia proprietary SRIOV NAD network resource name change is not supported")
+                }
+	}
+        return nil
+}
+
 
 func mutateNetworkAttachmentDefinition(netAttachDef netv1.NetworkAttachmentDefinition, patch []jsonPatchOperation) []jsonPatchOperation {
 	// Read NAD Config
