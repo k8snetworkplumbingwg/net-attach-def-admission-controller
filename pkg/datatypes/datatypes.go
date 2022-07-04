@@ -9,6 +9,7 @@ const (
 	NodeSelectorKey    = "k8s.v1.cni.cncf.io/nodeSelector"
 	ExtProjectIDKey    = "nokia.com/extProjectID"
 	ExtNetworkIDKey    = "nokia.com/extNetworkID"
+	SriovOverlaysKey   = "nokia.com/sriov-vf-vlan-trunk-overlays"
 	NetworkTopologyKey = "nokia.com/network-topology"
 	NetworkStatusKey   = "nokia.com/network-status"
 )

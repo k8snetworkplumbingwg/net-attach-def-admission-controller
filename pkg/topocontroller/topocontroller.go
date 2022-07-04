@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -215,20 +216,20 @@ func (c *TopologyController) shouldTriggerAction(nad *netattachdef.NetworkAttach
 		return netConf, false
 	}
 	klog.Infof("nodeSelector: %s", ns)
-	// Check extProjectID
-	project, ok := annotationsMap[datatypes.ExtProjectIDKey]
-	if !ok || len(project) == 0 {
-		return netConf, false
-	}
-	klog.Infof("project: %s", project)
-	// Check extNetworkID
-	network, ok := annotationsMap[datatypes.ExtNetworkIDKey]
-	if !ok || len(network) == 0 {
-		return netConf, false
-	}
-	klog.Infof("network: %s", network)
 	// Check NAD type
 	if netConf.Type == "ipvlan" {
+		// Check extProjectID
+		project, ok := annotationsMap[datatypes.ExtProjectIDKey]
+		if !ok || len(project) == 0 {
+			return netConf, false
+		}
+		klog.Infof("project: %s", project)
+		// Check extNetworkID
+		network, ok := annotationsMap[datatypes.ExtNetworkIDKey]
+		if !ok || len(network) == 0 {
+			return netConf, false
+		}
+		klog.Infof("network: %s", network)
 		if netConf.Vlan < 1 || netConf.Vlan > 4095 {
 			return netConf, false
 		}
@@ -248,17 +249,66 @@ func (c *TopologyController) shouldTriggerAction(nad *netattachdef.NetworkAttach
 	}
 	if netConf.Type == "sriov" {
 		if netConf.Vlan == 0 {
-			klog.Infof("vlan not present, check vlan_trunk %s", netConf.VlanTrunk)
+			// Check Overlays
+			klog.Infof("SRIOV flat vlan, check vlan_trunk in CNI %s", netConf.VlanTrunk)
 			if len(netConf.VlanTrunk) == 0 {
+				klog.Errorf("Missing vlan_trunk in CNI")
 				return netConf, false
 			}
-			_, err = getVlanIds(netConf.VlanTrunk)
+			vlanIds, err := getVlanIds(netConf.VlanTrunk)
 			if err != nil {
-				klog.Errorf("%s", err.Error())
+				klog.Errorf("Invalid vlan_trunk in CNI: %s", err.Error())
 				return netConf, false
 			}
-
+			jsonOverlays, ok := annotationsMap[datatypes.SriovOverlaysKey]
+			if !ok || len(jsonOverlays) == 0 {
+				klog.Errorf("Missing %s in annotations", datatypes.SriovOverlaysKey)
+				return netConf, false
+			}
+			var overlays []map[string]string
+			err = json.Unmarshal([]byte(jsonOverlays), &overlays)
+			if err != nil {
+				klog.Errorf("Failed to decode %s in annotations: %s", datatypes.SriovOverlaysKey, err.Error())
+				return netConf, false
+			}
+			var vlanRanges []string
+			for _, overlay := range overlays {
+				_, ok1 := overlay["extProjectID"]
+				_, ok2 := overlay["extNetworkID"]
+				vlanRange, ok3 := overlay["vlanRange"]
+				if !ok1 || !ok2 || !ok3 {
+					klog.Errorf("Invalid overlay value in %s", overlay)
+					return netConf, false
+				}
+				_, err = getVlanIds(vlanRange)
+				if err != nil {
+					klog.Errorf("Invalid vlan range %s in %s: %s", vlanRange, overlay, err.Error())
+					return netConf, false
+				}
+				vlanRanges = append(vlanRanges, vlanRange)
+			}
+			vlanTrunk := strings.Join(vlanRanges, ",")
+			klog.Infof("Check vlan range in annotations %s", vlanTrunk)
+			overlayVlanIds, _ := getVlanIds(vlanTrunk)
+			sort.Ints(vlanIds)
+			sort.Ints(overlayVlanIds)
+			if !reflect.DeepEqual(vlanIds, overlayVlanIds) {
+				klog.Errorf("Different vlan ranges found in CNI and annotations")
+				return netConf, false
+			}
 		} else {
+			// Check extProjectID
+			project, ok := annotationsMap[datatypes.ExtProjectIDKey]
+			if !ok || len(project) == 0 {
+				return netConf, false
+			}
+			klog.Infof("project: %s", project)
+			// Check extNetworkID
+			network, ok := annotationsMap[datatypes.ExtNetworkIDKey]
+			if !ok || len(network) == 0 {
+				return netConf, false
+			}
+			klog.Infof("network: %s", network)
 			if netConf.Vlan < 1 || netConf.Vlan > 4095 {
 				return netConf, false
 			}
@@ -374,13 +424,19 @@ func (c *TopologyController) handleNetAttachDefUpdateEvent(oldObj, newObj interf
 		return
 	}
 	anno1 := oldNad.GetAnnotations()
+	sriovOverlays1, _ := anno1[datatypes.SriovOverlaysKey]
 	proj1, _ := anno1[datatypes.ExtProjectIDKey]
 	net1, _ := anno1[datatypes.ExtNetworkIDKey]
 	ns1, _ := anno1[datatypes.NodeSelectorKey]
 	anno2 := newNad.GetAnnotations()
+	sriovOverlays2, _ := anno2[datatypes.SriovOverlaysKey]
 	proj2, _ := anno2[datatypes.ExtProjectIDKey]
 	net2, _ := anno2[datatypes.ExtNetworkIDKey]
 	ns2, _ := anno2[datatypes.NodeSelectorKey]
+	if sriovOverlays1 != sriovOverlays2 {
+		klog.Errorf("NAD SRIOV overlays change is not supported")
+		return
+	}
 	if proj1 != proj2 {
 		klog.Errorf("NAD project change is not supported")
 		return

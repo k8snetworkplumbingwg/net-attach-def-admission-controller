@@ -58,10 +58,10 @@ const (
 func (f *FssClient) GetAccessToken() error {
 	now := time.Now()
 	// Check if refreshToken expiried
-        if now.After(f.refreshTokenExpiry) {
-                klog.V(3).Info("refresh_token expired, login again")
-                return f.login(f.cfg.AuthURL)
-        }
+	if now.After(f.refreshTokenExpiry) {
+		klog.V(3).Info("refresh_token expired, login again")
+		return f.login(f.cfg.AuthURL)
+	}
 	// Check if accessToken expiried
 	if now.After(f.accessTokenExpiry) {
 		klog.V(3).Info("access_token expired, refresh it")
@@ -294,7 +294,6 @@ func NewFssClient(k8sClientSet kubernetes.Interface, podNamespace string, cfg *A
 	}
 	// Check the last registration
 	if !firstRun {
-		klog.Infof("Check if last plugin is still valid")
 		var plugin Plugin
 		jsonString := f.getConfigMap("plugin")
 		err = json.Unmarshal(jsonString, &plugin)
@@ -304,9 +303,10 @@ func NewFssClient(k8sClientSet kubernetes.Interface, podNamespace string, cfg *A
 			u := pluginPath + "/" + plugin.ID
 			statusCode, _, err := f.GET(u)
 			if err != nil || statusCode != 200 {
-				klog.Infof("Plugin is not longer valid")
+				klog.Infof("Last plugin is not longer valid")
 				firstRun = true
 			} else {
+				klog.Infof("Last plugin is still valid")
 				f.plugin = plugin
 			}
 		} else {
@@ -316,7 +316,6 @@ func NewFssClient(k8sClientSet kubernetes.Interface, podNamespace string, cfg *A
 	}
 	// Check the last deployment
 	if !firstRun {
-		klog.Infof("Check if last deployment is still valid")
 		var deployment Deployment
 		jsonString := f.getConfigMap("deployment")
 		if len(jsonString) > 0 {
@@ -327,8 +326,9 @@ func NewFssClient(k8sClientSet kubernetes.Interface, podNamespace string, cfg *A
 				u := deploymentPath + "/" + deployment.ID
 				statusCode, _, err := f.GET(u)
 				if err != nil || statusCode != 200 {
-					klog.Infof("Deployment is not longer valid")
+					klog.Infof("Last deployment is not longer valid")
 				} else {
+					klog.Infof("Last deployment is still valid")
 					hasDeployment = true
 					f.deployment = deployment
 				}
@@ -392,7 +392,7 @@ func NewFssClient(k8sClientSet kubernetes.Interface, podNamespace string, cfg *A
 	}
 	// Wait Admin set adminUp to true
 	if !f.deployment.AdminUp {
-		klog.Infof("Wait Admin set adminUp to true for plugin %s deployment %s...", f.plugin.ID, f.deployment.ID)
+		klog.Infof("Wait adminUp becomes true for plugin %s deployment %s...", f.plugin.ID, f.deployment.ID)
 		path := deploymentPath + "/" + f.deployment.ID
 		for !f.deployment.AdminUp {
 			time.Sleep(10 * time.Second)

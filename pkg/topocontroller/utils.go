@@ -3,6 +3,7 @@ package topocontroller
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -223,26 +224,34 @@ func (c *TopologyController) handleNetworkAttach(nad *netattachdef.NetworkAttach
 		klog.Infof("Skip the ATTACH procedure: no candicate node found for %s/%s", namespace, name)
 		return nil
 	}
-	var vlanIds []int
-	if netConf.Type == "sriov" && netConf.Vlan == 0 {
-		vlanIds, _ = getVlanIds(netConf.VlanTrunk)
-	} else {
-		vlanIds = append(vlanIds, netConf.Vlan)
-	}
-	nodesStatus, err := c.vlanProvider.Attach(project, network, vlanIds, nodesInfo, action)
-	if err != nil {
-		klog.Errorf("Plugin Attach for vlan %v failed: %s", vlanIds, err.Error())
-	}
-	for k, v := range nodesStatus {
-		if err == nil && v == nil {
-			nodesAttached = append(nodesAttached, k)
-		} else {
-			nodesAttachFailed = append(nodesAttachFailed, k)
-		}
-	}
 
-	nodesDetached := []string{}
-	c.updateNadAnnotations(nad, nodesAttached, nodesAttachFailed, nodesDetached)
+	var overlays []map[string]string
+	if netConf.Type == "sriov" && netConf.Vlan == 0 {
+		jsonOverlays, _ := annotationsMap[datatypes.SriovOverlaysKey]
+		json.Unmarshal([]byte(jsonOverlays), &overlays)
+	} else {
+		overlay := map[string]string{"extProjectID": project, "extNetworkID": network, "vlanRange": strconv.Itoa(netConf.Vlan)}
+		overlays = append(overlays, overlay)
+	}
+	for _, v := range overlays {
+		vlanIds, _ := getVlanIds(v["vlanRange"])
+		project := v["extProjectID"]
+		network := v["extNetworkID"]
+		nodesStatus, err := c.vlanProvider.Attach(project, network, vlanIds, nodesInfo, action)
+		if err != nil {
+			klog.Errorf("Plugin Attach for vlan %v failed: %s", vlanIds, err.Error())
+		}
+		for k, v := range nodesStatus {
+			if err == nil && v == nil {
+				nodesAttached = append(nodesAttached, k)
+			} else {
+				nodesAttachFailed = append(nodesAttachFailed, k)
+			}
+		}
+
+		nodesDetached := []string{}
+		c.updateNadAnnotations(nad, nodesAttached, nodesAttachFailed, nodesDetached)
+	}
 	return nil
 }
 
@@ -298,21 +307,29 @@ func (c *TopologyController) handleNetworkDetach(nad *netattachdef.NetworkAttach
 		klog.Infof("Skip the DETACH procedure: no candidate node found for %s/%s", namespace, name)
 		return nil
 	}
-	var vlanIds []int
-	if netConf.Type == "sriov" && netConf.Vlan == 0 {
-		vlanIds, _ = getVlanIds(netConf.VlanTrunk)
-	} else {
-		vlanIds = append(vlanIds, netConf.Vlan)
-	}
-	_, err := c.vlanProvider.Detach(project, network, vlanIds, nodesInfo, action)
-	if err != nil {
-		klog.Errorf("Plugin Detach for vlan %v failed: %s", vlanIds, err.Error())
-	}
 
-	if action != datatypes.DeleteDetach {
-		nodesAttached := []string{}
-		nodesAttachFailed := []string{}
-		c.updateNadAnnotations(nad, nodesAttached, nodesAttachFailed, nodesDetached)
+	var overlays []map[string]string
+	if netConf.Type == "sriov" && netConf.Vlan == 0 {
+		jsonOverlays, _ := annotationsMap[datatypes.SriovOverlaysKey]
+		json.Unmarshal([]byte(jsonOverlays), &overlays)
+	} else {
+		overlay := map[string]string{"extProjectID": project, "extNetworkID": network, "vlanRange": strconv.Itoa(netConf.Vlan)}
+		overlays = append(overlays, overlay)
+	}
+	for _, v := range overlays {
+		vlanIds, _ := getVlanIds(v["vlanRange"])
+		project := v["extProjectID"]
+		network := v["extNetworkID"]
+		_, err := c.vlanProvider.Detach(project, network, vlanIds, nodesInfo, action)
+		if err != nil {
+			klog.Errorf("Plugin Detach for vlan %v failed: %s", vlanIds, err.Error())
+		}
+
+		if action != datatypes.DeleteDetach {
+			nodesAttached := []string{}
+			nodesAttachFailed := []string{}
+			c.updateNadAnnotations(nad, nodesAttached, nodesAttachFailed, nodesDetached)
+		}
 	}
 	return nil
 }
