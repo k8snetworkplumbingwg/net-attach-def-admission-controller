@@ -52,11 +52,12 @@ func (p *FssVlanProvider) UpdateNodeTopology(name string, topology string) (stri
 	return topology, nil
 }
 
-func (p *FssVlanProvider) Attach(fssWorkloadEvpnId string, fssSubnetId string, vlanIds []int, nodesInfo map[string]datatypes.NicMap, requestType datatypes.NadAction) (map[string]error, error) {
+func (p *FssVlanProvider) Attach(fssWorkloadEvpnId, fssSubnetId, vlanRange string, nodesInfo map[string]datatypes.NicMap, requestType datatypes.NadAction) (map[string]error, error) {
 	nodesStatus := make(map[string]error)
 	for k, _ := range nodesInfo {
 		nodesStatus[k] = errors.New("undefined")
 	}
+	vlanIds, _ := datatypes.GetVlanIds(vlanRange)
 	for _, vlanId := range vlanIds {
 		klog.Infof("Attach step 1: get hostPortLabel for vlan %d on fssWorkloadEvpnId %s fssSubnetId %s", vlanId, fssWorkloadEvpnId, fssSubnetId)
 		hostPortLabelID, err := p.fssClient.CreateSubnetInterface(fssWorkloadEvpnId, fssSubnetId, vlanId)
@@ -86,11 +87,12 @@ func (p *FssVlanProvider) Attach(fssWorkloadEvpnId string, fssSubnetId string, v
 	return nodesStatus, nil
 }
 
-func (p *FssVlanProvider) Detach(fssWorkloadEvpnId string, fssSubnetId string, vlanIds []int, nodesInfo map[string]datatypes.NicMap, requestType datatypes.NadAction) (map[string]error, error) {
+func (p *FssVlanProvider) Detach(fssWorkloadEvpnId, fssSubnetId, vlanRange string, nodesInfo map[string]datatypes.NicMap, requestType datatypes.NadAction) (map[string]error, error) {
 	nodesStatus := make(map[string]error)
 	for k, _ := range nodesInfo {
 		nodesStatus[k] = errors.New("undefined")
 	}
+	vlanIds, _ := datatypes.GetVlanIds(vlanRange)
 	for _, vlanId := range vlanIds {
 		klog.Infof("Detach step 1: get hostPortLabel for vlan %d on fssWorkloadEvpnId %s fssSubnetId %s", vlanId, fssWorkloadEvpnId, fssSubnetId)
 		hostPortLabelID, exists := p.fssClient.GetSubnetInterface(fssWorkloadEvpnId, fssSubnetId, vlanId)

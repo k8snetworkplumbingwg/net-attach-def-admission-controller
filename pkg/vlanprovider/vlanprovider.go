@@ -10,8 +10,8 @@ import (
 type VlanProvider interface {
 	Connect(kubernetes.Interface, string) error
 	UpdateNodeTopology(string, string) (string, error)
-	Attach(string, string, []int, map[string]datatypes.NicMap, datatypes.NadAction) (map[string]error, error)
-	Detach(string, string, []int, map[string]datatypes.NicMap, datatypes.NadAction) (map[string]error, error)
+	Attach(string, string, string, map[string]datatypes.NicMap, datatypes.NadAction) (map[string]error, error)
+	Detach(string, string, string, map[string]datatypes.NicMap, datatypes.NadAction) (map[string]error, error)
 }
 
 func NewVlanProvider(provider string, config string) (VlanProvider, error) {

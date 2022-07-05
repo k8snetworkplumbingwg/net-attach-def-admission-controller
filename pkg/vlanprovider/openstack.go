@@ -188,12 +188,12 @@ func (p *OpenstackVlanProvider) UpdateNodeTopology(name string, topology string)
 	return string(updated), nil
 }
 
-func (p *OpenstackVlanProvider) Attach(project string, network string, vlanIds []int, nodesInfo map[string]datatypes.NicMap, requestType datatypes.NadAction) (map[string]error, error) {
+func (p *OpenstackVlanProvider) Attach(project, network, vlanRange string, nodesInfo map[string]datatypes.NicMap, requestType datatypes.NadAction) (map[string]error, error) {
 	nodesStatus := make(map[string]error)
 	return nodesStatus, nil
 }
 
-func (p *OpenstackVlanProvider) Detach(project string, network string, vlanIds []int, nodesInfo map[string]datatypes.NicMap, requestType datatypes.NadAction) (map[string]error, error) {
+func (p *OpenstackVlanProvider) Detach(project, network, vlanRange string, nodesInfo map[string]datatypes.NicMap, requestType datatypes.NadAction) (map[string]error, error) {
 	nodesStatus := make(map[string]error)
 	return nodesStatus, nil
 }

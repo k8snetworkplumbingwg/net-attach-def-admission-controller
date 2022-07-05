@@ -2,13 +2,7 @@ package topocontroller
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"reflect"
-	"regexp"
-	"sort"
-	"strconv"
-	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -171,157 +165,6 @@ func (c *TopologyController) handleNodeUpdateEvent(oldObj, newObj interface{}) {
 	c.workqueue.Add(workItem)
 }
 
-func getVlanIds(vlanTrunk string) ([]int, error) {
-	result := []int{}
-	err := fmt.Errorf("Trunk format is invalid, it should follow this pattern 50,51,700-710")
-	if !regexp.MustCompile(`^[0-9\,\-]*$`).MatchString(vlanTrunk) {
-		return result, err
-	}
-	m := strings.Split(vlanTrunk, ",")
-	for _, v := range m {
-		if strings.Contains(v, "-") {
-			n := strings.Split(v, "-")
-			if len(n) != 2 {
-				return result, err
-			}
-			min, _ := strconv.Atoi(n[0])
-			max, _ := strconv.Atoi(n[1])
-			if min == 0 || min > max {
-				return result, err
-			}
-			count := max - min + 1
-			for i := 0; i < count; i++ {
-				result = append(result, min+i)
-			}
-		} else {
-			vi, _ := strconv.Atoi(v)
-			result = append(result, vi)
-		}
-	}
-	return result, nil
-}
-
-func (c *TopologyController) shouldTriggerAction(nad *netattachdef.NetworkAttachmentDefinition) (datatypes.NetConf, bool) {
-	// Read NAD Config
-	var netConf datatypes.NetConf
-	err := json.Unmarshal([]byte(nad.Spec.Config), &netConf)
-	if err != nil {
-		klog.Errorf("read NAD config failed: %s", err.Error())
-		return netConf, false
-	}
-	// Check nodeSelector
-	annotationsMap := nad.GetAnnotations()
-	ns, ok := annotationsMap[datatypes.NodeSelectorKey]
-	if !ok || len(ns) == 0 {
-		return netConf, false
-	}
-	klog.Infof("nodeSelector: %s", ns)
-	// Check NAD type
-	if netConf.Type == "ipvlan" {
-		// Check extProjectID
-		project, ok := annotationsMap[datatypes.ExtProjectIDKey]
-		if !ok || len(project) == 0 {
-			return netConf, false
-		}
-		klog.Infof("project: %s", project)
-		// Check extNetworkID
-		network, ok := annotationsMap[datatypes.ExtNetworkIDKey]
-		if !ok || len(network) == 0 {
-			return netConf, false
-		}
-		klog.Infof("network: %s", network)
-		if netConf.Vlan < 1 || netConf.Vlan > 4095 {
-			return netConf, false
-		}
-		// Check master is tenant-bond.vlan or provider-bond.vlan
-		if !strings.HasPrefix(netConf.Master, "tenant-bond.") && !strings.HasPrefix(netConf.Master, "provider-bond.") {
-			return netConf, false
-		}
-		m := strings.Split(netConf.Master, ".")
-		v, err := strconv.Atoi(m[1])
-		if err != nil {
-			return netConf, false
-		}
-		if v != netConf.Vlan {
-			return netConf, false
-		}
-		return netConf, true
-	}
-	if netConf.Type == "sriov" {
-		if netConf.Vlan == 0 {
-			// Check Overlays
-			klog.Infof("SRIOV flat vlan, check vlan_trunk in CNI %s", netConf.VlanTrunk)
-			if len(netConf.VlanTrunk) == 0 {
-				klog.Errorf("Missing vlan_trunk in CNI")
-				return netConf, false
-			}
-			vlanIds, err := getVlanIds(netConf.VlanTrunk)
-			if err != nil {
-				klog.Errorf("Invalid vlan_trunk in CNI: %s", err.Error())
-				return netConf, false
-			}
-			jsonOverlays, ok := annotationsMap[datatypes.SriovOverlaysKey]
-			if !ok || len(jsonOverlays) == 0 {
-				klog.Errorf("Missing %s in annotations", datatypes.SriovOverlaysKey)
-				return netConf, false
-			}
-			var overlays []map[string]string
-			err = json.Unmarshal([]byte(jsonOverlays), &overlays)
-			if err != nil {
-				klog.Errorf("Failed to decode %s in annotations: %s", datatypes.SriovOverlaysKey, err.Error())
-				return netConf, false
-			}
-			var vlanRanges []string
-			for _, overlay := range overlays {
-				_, ok1 := overlay["extProjectID"]
-				_, ok2 := overlay["extNetworkID"]
-				vlanRange, ok3 := overlay["vlanRange"]
-				if !ok1 || !ok2 || !ok3 {
-					klog.Errorf("Invalid overlay value in %s", overlay)
-					return netConf, false
-				}
-				_, err = getVlanIds(vlanRange)
-				if err != nil {
-					klog.Errorf("Invalid vlan range %s in %s: %s", vlanRange, overlay, err.Error())
-					return netConf, false
-				}
-				vlanRanges = append(vlanRanges, vlanRange)
-			}
-			vlanTrunk := strings.Join(vlanRanges, ",")
-			klog.Infof("Check vlan range in annotations %s", vlanTrunk)
-			overlayVlanIds, _ := getVlanIds(vlanTrunk)
-			sort.Ints(vlanIds)
-			sort.Ints(overlayVlanIds)
-			if !reflect.DeepEqual(vlanIds, overlayVlanIds) {
-				klog.Errorf("Different vlan ranges found in CNI and annotations")
-				return netConf, false
-			}
-		} else {
-			// Check extProjectID
-			project, ok := annotationsMap[datatypes.ExtProjectIDKey]
-			if !ok || len(project) == 0 {
-				return netConf, false
-			}
-			klog.Infof("project: %s", project)
-			// Check extNetworkID
-			network, ok := annotationsMap[datatypes.ExtNetworkIDKey]
-			if !ok || len(network) == 0 {
-				return netConf, false
-			}
-			klog.Infof("network: %s", network)
-			if netConf.Vlan < 1 || netConf.Vlan > 4095 {
-				return netConf, false
-			}
-		}
-		resourceName, ok := annotationsMap[datatypes.SriovResourceKey]
-		if !ok || len(resourceName) == 0 {
-			return netConf, false
-		}
-		return netConf, true
-	}
-	return netConf, false
-}
-
 func (c *TopologyController) handleNetAttachDefAddEvent(obj interface{}) {
 	klog.V(3).Info("net-attach-def add event received")
 	nad, ok := obj.(*netattachdef.NetworkAttachmentDefinition)
@@ -334,8 +177,8 @@ func (c *TopologyController) handleNetAttachDefAddEvent(obj interface{}) {
 	klog.Infof("handling nad addition of %s/%s", namespace, name)
 
 	// Check NAD for action
-	_, trigger := c.shouldTriggerAction(nad)
-	if !trigger {
+	_, trigger, err := datatypes.ShouldTriggerTopoAction(nad)
+	if err != nil || !trigger {
 		klog.Infof("not an action triggering nad, ignored")
 		return
 	}
@@ -356,8 +199,8 @@ func (c *TopologyController) handleNetAttachDefDeleteEvent(obj interface{}) {
 	klog.Infof("handling nad deletion of %s/%s", namespace, name)
 
 	// Check NAD for action
-	_, trigger := c.shouldTriggerAction(nad)
-	if !trigger {
+	_, trigger, err := datatypes.ShouldTriggerTopoAction(nad)
+	if err != nil || !trigger {
 		klog.Infof("not an action triggering nad, ignored")
 		return
 	}
@@ -388,68 +231,11 @@ func (c *TopologyController) handleNetAttachDefUpdateEvent(oldObj, newObj interf
 	klog.Infof("handling nad update of %s/%s", namespace, name)
 
 	// Check NAD for action
-	oldNetConf, trigger1 := c.shouldTriggerAction(oldNad)
-	newNetConf, trigger2 := c.shouldTriggerAction(newNad)
-	klog.Infof("trigger1=%t, trigger2=%t", trigger1, trigger2)
-	if !trigger1 && !trigger2 {
+	updateAction, err := datatypes.ShouldTriggerTopoUpdate(oldNad, newNad)
+	if err != nil || updateAction == 0 {
 		return
 	}
-	if !trigger1 && trigger2 {
-		klog.Infof("NAD is changed to action triggering")
-		workItem := WorkItem{action: datatypes.UpdateAttach, newNad: newNad}
-		c.workqueue.Add(workItem)
-		return
-	}
-	if trigger1 && !trigger2 {
-		klog.Infof("NAD is changed to not action triggering")
-		workItem := WorkItem{action: datatypes.UpdateDetach, oldNad: oldNad}
-		c.workqueue.Add(workItem)
-		return
-	}
-	// Handle network change
-	if oldNetConf.Type != newNetConf.Type {
-		klog.Errorf("NAD type change is not supported")
-		return
-	}
-	if oldNetConf.Type == "ipvlan" && oldNetConf.Master != newNetConf.Master {
-		klog.Errorf("IPVLAN NAD master device change is not supported")
-		return
-	}
-	if oldNetConf.Vlan > 0 && oldNetConf.Vlan != newNetConf.Vlan {
-		klog.Errorf("NAD vlan change is not supported")
-		return
-	}
-	if oldNetConf.Vlan == 0 && oldNetConf.VlanTrunk != newNetConf.VlanTrunk {
-		klog.Errorf("SRIOV NAD vlan_trunk change is not supported")
-		return
-	}
-	anno1 := oldNad.GetAnnotations()
-	sriovOverlays1, _ := anno1[datatypes.SriovOverlaysKey]
-	proj1, _ := anno1[datatypes.ExtProjectIDKey]
-	net1, _ := anno1[datatypes.ExtNetworkIDKey]
-	ns1, _ := anno1[datatypes.NodeSelectorKey]
-	anno2 := newNad.GetAnnotations()
-	sriovOverlays2, _ := anno2[datatypes.SriovOverlaysKey]
-	proj2, _ := anno2[datatypes.ExtProjectIDKey]
-	net2, _ := anno2[datatypes.ExtNetworkIDKey]
-	ns2, _ := anno2[datatypes.NodeSelectorKey]
-	if sriovOverlays1 != sriovOverlays2 {
-		klog.Errorf("NAD SRIOV overlays change is not supported")
-		return
-	}
-	if proj1 != proj2 {
-		klog.Errorf("NAD project change is not supported")
-		return
-	}
-	if net1 != net2 {
-		klog.Errorf("NAD network change is not supported")
-		return
-	}
-	if ns1 == ns2 {
-		klog.Info("nodeSelector is not changed")
-		return
-	}
-	workItem := WorkItem{action: datatypes.UpdateAttachDetach, oldNad: oldNad, newNad: newNad}
+	workItem := WorkItem{action: updateAction, oldNad: oldNad, newNad: newNad}
 	c.workqueue.Add(workItem)
 }
 

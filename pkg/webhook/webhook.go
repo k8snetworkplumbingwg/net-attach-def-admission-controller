@@ -36,14 +36,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-)
 
-type NetConf struct {
-	types.NetConf
-	Master    string `json:"master,omitempty"`
-	Vlan      int    `json:"vlan,omitempty"`
-	VlanTrunk string `json:"vlan_trunk,omitempty"`
-}
+	"github.com/nokia/net-attach-def-admission-controller/pkg/datatypes"
+)
 
 type jsonPatchOperation struct {
 	Operation string      `json:"op"`
@@ -52,12 +47,8 @@ type jsonPatchOperation struct {
 }
 
 const (
-	nodeSelectorKey        = "k8s.v1.cni.cncf.io/nodeSelector"
 	networksAnnotationKey  = "k8s.v1.cni.cncf.io/networks"
 	networkResourceNameKey = "k8s.v1.cni.cncf.io/resourceName"
-	extNetworkIDKey        = "nokia.com/extNetworkID"
-	extProjectIDKey        = "nokia.com/extProjectID"
-	sriovOverlaysKey       = "nokia.com/sriov-vf-vlan-trunk-overlays"
 	namespaceConstraint    = "_local"
 )
 
@@ -265,15 +256,14 @@ func validateNetworkAttachmentDefinition(operation v1beta1.Operation, netAttachD
 				return false, false, err
 			}
 		}
-		// additional validation on ipvlan type
-		mutate, err := validateCNIIpvlanConfig(operation, netAttachDef, oldNad)
+		// validate for VLAN Operator
+		mutate, err := validateForVlanOperator(operation, oldNad, netAttachDef)
 		if err != nil {
-			err := errors.New(err.Error())
 			return false, false, err
 		}
 		// validate for Fabric Operator
-		if err := validateForFabricOperator(operation, netAttachDef, oldNad); err != nil {
-			err := errors.New(err.Error())
+		err = validateForFabricOperator(operation, oldNad, netAttachDef)
+		if err != nil {
 			return false, false, err
 		}
 		mutationRequired = mutate
@@ -286,12 +276,19 @@ func validateNetworkAttachmentDefinition(operation v1beta1.Operation, netAttachD
 }
 
 func isVlanOperatorRequired(netAttachDef netv1.NetworkAttachmentDefinition) bool {
+	// Check nodeSelector
+	annotationsMap := netAttachDef.GetAnnotations()
+	ns, ok := annotationsMap[datatypes.NodeSelectorKey]
+	if !ok || len(ns) == 0 {
+		return false
+	}
+	// Check ipvlan type
 	var c map[string]interface{}
 	json.Unmarshal([]byte(netAttachDef.Spec.Config), &c)
 	if cniType, ok := c["type"]; ok {
 		if cniType == "ipvlan" {
 			annotationsMap := netAttachDef.GetAnnotations()
-			ns, ok := annotationsMap[nodeSelectorKey]
+			ns, ok := annotationsMap[datatypes.NodeSelectorKey]
 			if !ok || len(ns) == 0 {
 				return false
 			}
@@ -306,9 +303,9 @@ func isVlanOperatorRequired(netAttachDef netv1.NetworkAttachmentDefinition) bool
 	return false
 }
 
-func shouldTriggerMutation(netAttachDef netv1.NetworkAttachmentDefinition) (NetConf, bool, error) {
+func shouldTriggerMutation(netAttachDef netv1.NetworkAttachmentDefinition) (datatypes.NetConf, bool, error) {
 	// Read NAD Config
-	var netConf NetConf
+	var netConf datatypes.NetConf
 	json.Unmarshal([]byte(netAttachDef.Spec.Config), &netConf)
 	if netConf.Vlan < 1 || netConf.Vlan > 4095 {
 		return netConf, false, fmt.Errorf("Nokia Proprietary IPVLAN vlan value out of bound. Valid range 1..4095")
@@ -318,7 +315,7 @@ func shouldTriggerMutation(netAttachDef netv1.NetworkAttachmentDefinition) (NetC
 	}
 	// Check nodeSelector
 	annotationsMap := netAttachDef.GetAnnotations()
-	ns, ok := annotationsMap[nodeSelectorKey]
+	ns, ok := annotationsMap[datatypes.NodeSelectorKey]
 	if !ok || len(ns) == 0 {
 		return netConf, false, fmt.Errorf("NAD with ipvlan, but nodeSelector is not present")
 	}
@@ -340,12 +337,12 @@ func shouldTriggerMutation(netAttachDef netv1.NetworkAttachmentDefinition) (NetC
 	return netConf, true, nil
 }
 
-// validateCNIIpvlanConfig verifies following fields
+// validateForVlanOperator verifies following fields
 // conf: 'master' and 'vlan'
 // annotatoin: 'nodeSelector'
 // also check if mutation is needed
 // return mutationRequired, and err for ipvlan validation error
-func validateCNIIpvlanConfig(operation v1beta1.Operation, netAttachDef netv1.NetworkAttachmentDefinition, oldNad netv1.NetworkAttachmentDefinition) (bool, error) {
+func validateForVlanOperator(operation v1beta1.Operation, oldNad, netAttachDef netv1.NetworkAttachmentDefinition) (bool, error) {
 	//skip checking if vlan operator is not required
 	if !isVlanOperatorRequired(netAttachDef) {
 		return false, nil
@@ -361,7 +358,6 @@ func validateCNIIpvlanConfig(operation v1beta1.Operation, netAttachDef netv1.Net
 		oldConf, _, _ := shouldTriggerMutation(oldNad)
 		//ensure it is nokia proprietary ipvlan by checking if vlan id present in existing NAD
 		if oldConf.Vlan > 0 && oldConf.Master != netConf.Master && oldConf.Master != netConf.Master+"."+strconv.Itoa(netConf.Vlan) {
-			glog.Error("master and vlan field shall not change, you should delete and re-create")
 			return false, fmt.Errorf("Nokia Proprietary IPVLAN master and vlan field change is not allowed")
 		}
 	}
@@ -372,101 +368,56 @@ func validateCNIIpvlanConfig(operation v1beta1.Operation, netAttachDef netv1.Net
 func isFabricOperatorRequired(netAttachDef netv1.NetworkAttachmentDefinition) bool {
 	// Check nodeSelector
 	annotationsMap := netAttachDef.GetAnnotations()
-	ns, ok := annotationsMap[nodeSelectorKey]
+	ns, ok := annotationsMap[datatypes.NodeSelectorKey]
 	if !ok || len(ns) == 0 {
 		return false
 	}
-	// Check extProjectID
-	project, ok := annotationsMap[extProjectIDKey]
-	if !ok || len(project) == 0 {
-		return false
+	// Check extProjectID and extNetworkID
+	project, ok1 := annotationsMap[datatypes.ExtProjectIDKey]
+	network, ok2 := annotationsMap[datatypes.ExtNetworkIDKey]
+	if ok1 && len(project) > 0 && ok2 && len(network) > 0 {
+		return true
 	}
-	// Check extNetworkID
-	network, ok := annotationsMap[extNetworkIDKey]
-	if !ok || len(network) == 0 {
-		return false
+	// Check SRIOV overlays
+	sriovOverlays, ok3 := annotationsMap[datatypes.SriovOverlaysKey]
+	if ok3 && len(sriovOverlays) > 0 {
+		return true
 	}
-
-	return true
+	return false
 }
 
 // validateForFabricOperator verifies following fields
 // annotatoin: 'nodeSelector', 'extNetworkID', 'extProjectID' and 'resourceName'
 // conf: 'type', 'vlan' and 'vlan_trunk'
 // return err for validation error
-func validateForFabricOperator(operation v1beta1.Operation, netAttachDef netv1.NetworkAttachmentDefinition, oldNad netv1.NetworkAttachmentDefinition) error {
+func validateForFabricOperator(operation v1beta1.Operation, oldNad, netAttachDef netv1.NetworkAttachmentDefinition) error {
 	//skip checking if Fabric operator is not required
 	if !isFabricOperatorRequired(netAttachDef) && !isFabricOperatorRequired(oldNad) {
 		return nil
 	}
 
-	var netConf NetConf
-	json.Unmarshal([]byte(netAttachDef.Spec.Config), &netConf)
-	annotationsMap := netAttachDef.GetAnnotations()
-	proj, _ := annotationsMap[extProjectIDKey]
-	net, _ := annotationsMap[extNetworkIDKey]
-	sriovOverlays, _ := annotationsMap[sriovOverlaysKey]
-
-	resourceName, ok := annotationsMap[networkResourceNameKey]
-	if "sriov" == netConf.Type {
-		if !ok || len(resourceName) == 0 {
-			return fmt.Errorf("Nokia Proprietary  SRIOV NAD requires resource name")
+	// Check NAD for topology action
+	if operation == "CREATE" {
+		_, _, err := datatypes.ShouldTriggerTopoAction(&netAttachDef)
+		if err != nil {
+			return fmt.Errorf("not a valid topology action (CREATE) triggering nad, reject")
 		}
+
 	}
 
-	//now check for update
-	if operation != "UPDATE" {
-		return nil
+	if operation == "UPDATE" {
+		_, err := datatypes.ShouldTriggerTopoUpdate(&netAttachDef, &oldNad)
+		if err != nil {
+			return fmt.Errorf("not a valid topology action (UPDATE) triggering nad, reject")
+		}
 	}
 
-	var oldNetConf NetConf
-	json.Unmarshal([]byte(oldNad.Spec.Config), &oldNetConf)
-	// Handle network change
-	if oldNetConf.Type != netConf.Type {
-		return fmt.Errorf("Nokia proprietary NAD type change is not support")
-	}
-	if oldNetConf.Vlan > 0 && oldNetConf.Vlan != netConf.Vlan {
-		return fmt.Errorf("Nokia proprietary NAD vlan change is not supported")
-	}
-	if oldNetConf.Vlan == 0 && oldNetConf.VlanTrunk != netConf.VlanTrunk {
-		return fmt.Errorf("Nokia proprietary SRIOV NAD vlan_trunk change is not supported")
-	}
-	oldAnnotationsMap := oldNad.GetAnnotations()
-	oldProj, _ := oldAnnotationsMap[extProjectIDKey]
-	oldNet, _ := oldAnnotationsMap[extNetworkIDKey]
-	oldSriovOverlays, _ := oldAnnotationsMap[sriovOverlaysKey]
-	if "ipvlan" == netConf.Type {
-		if oldProj != proj {
-			return fmt.Errorf("Nokia proprietary NAD project change is not supported")
-		}
-		if oldNet != net {
-			return fmt.Errorf("Nokia proprietary NAD network change is not supported")
-		}
-	}
-	if "sriov" == netConf.Type {
-		if netConf.Vlan == 0 {
-			if oldSriovOverlays != sriovOverlays {
-				return fmt.Errorf("Nokia proprietary NAD SRIOV overlays change is not supported")
-			}
-		} else {
-			if oldProj != proj {
-				return fmt.Errorf("Nokia proprietary NAD project change is not supported")
-			}
-			if oldNet != net {
-				return fmt.Errorf("Nokia proprietary NAD network change is not supported")
-			}
-		}
-		oldResourceName, _ := oldAnnotationsMap[networkResourceNameKey]
-		if oldResourceName != resourceName {
-			return fmt.Errorf("Nokia proprietary SRIOV NAD network resource name change is not supported")
-		}
-	}
 	return nil
 }
 
 func mutateNetworkAttachmentDefinition(netAttachDef netv1.NetworkAttachmentDefinition, patch []jsonPatchOperation) []jsonPatchOperation {
 	// Read NAD Config
-	var netConf NetConf
+	var netConf datatypes.NetConf
 	json.Unmarshal([]byte(netAttachDef.Spec.Config), &netConf)
 	vlanIfName := netConf.Master + "." + strconv.Itoa(netConf.Vlan)
 	var c map[string]interface{}

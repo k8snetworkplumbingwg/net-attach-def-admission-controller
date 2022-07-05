@@ -69,7 +69,7 @@ func (c *TopologyController) getChangedNodes(oldNad, newNad *netattachdef.Networ
 	return nodesToDetach, nodesToAttach, nil
 }
 
-func (c *TopologyController) updateNadAnnotations(nad *netattachdef.NetworkAttachmentDefinition, nodesAttached []string, nodesAttachFailed []string, nodesDetached []string) error {
+func (c *TopologyController) updateNadAnnotations(nad *netattachdef.NetworkAttachmentDefinition, nodesAttached, nodesAttachFailed, nodesDetached []string) error {
 	klog.Infof("updateNadAnnotations invoked for %s/%s", nad.ObjectMeta.Name, nad.ObjectMeta.Namespace)
 	for i := 0; i < 256; i++ {
 		nad, err := c.netAttachDefClientSet.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.ObjectMeta.Namespace).Get(context.TODO(), nad.ObjectMeta.Name, metav1.GetOptions{})
@@ -101,8 +101,8 @@ func (c *TopologyController) updateNadAnnotations(nad *netattachdef.NetworkAttac
 					if !nodeExists {
 						networkStatus["attached"] = append(networkStatus["attached"], n)
 					}
-					for k, w := range networkStatus["attachment-failed"] {
-						if n == w {
+					for k, v := range networkStatus["attachment-failed"] {
+						if n == v {
 							networkStatus["attachment-failed"] = append(networkStatus["attachment-failed"][:k], networkStatus["attachment-failed"][k+1:]...)
 							break
 						}
@@ -121,8 +121,8 @@ func (c *TopologyController) updateNadAnnotations(nad *netattachdef.NetworkAttac
 					if !nodeExists {
 						networkStatus["attachment-failed"] = append(networkStatus["attachment-failed"], n)
 					}
-					for k, w := range networkStatus["attached"] {
-						if n == w {
+					for k, v := range networkStatus["attached"] {
+						if n == v {
 							networkStatus["attached"] = append(networkStatus["attached"][:k], networkStatus["attached"][k+1:]...)
 							break
 						}
@@ -233,25 +233,36 @@ func (c *TopologyController) handleNetworkAttach(nad *netattachdef.NetworkAttach
 		overlay := map[string]string{"extProjectID": project, "extNetworkID": network, "vlanRange": strconv.Itoa(netConf.Vlan)}
 		overlays = append(overlays, overlay)
 	}
-	for _, v := range overlays {
-		vlanIds, _ := getVlanIds(v["vlanRange"])
-		project := v["extProjectID"]
-		network := v["extNetworkID"]
-		nodesStatus, err := c.vlanProvider.Attach(project, network, vlanIds, nodesInfo, action)
+	nodesError := make(map[string]error)
+	for k, _ := range nodesInfo {
+		nodesError[k] = nil
+	}
+	for _, overlay := range overlays {
+		project := overlay["extProjectID"]
+		network := overlay["extNetworkID"]
+		vlanRange := overlay["vlanRange"]
+		nodesStatus, err := c.vlanProvider.Attach(project, network, vlanRange, nodesInfo, action)
 		if err != nil {
-			klog.Errorf("Plugin Attach for vlan %v failed: %s", vlanIds, err.Error())
+			klog.Errorf("Plugin Attach for vlan %s failed: %s", vlanRange, err.Error())
 		}
 		for k, v := range nodesStatus {
-			if err == nil && v == nil {
-				nodesAttached = append(nodesAttached, k)
-			} else {
-				nodesAttachFailed = append(nodesAttachFailed, k)
+			if v != nil {
+				nodesStatus[k] = v
+			} else if err != nil {
+				nodesStatus[k] = err
 			}
 		}
-
-		nodesDetached := []string{}
-		c.updateNadAnnotations(nad, nodesAttached, nodesAttachFailed, nodesDetached)
 	}
+
+	for k, v := range nodesError {
+		if v == nil {
+			nodesAttached = append(nodesAttached, k)
+		} else {
+			nodesAttachFailed = append(nodesAttachFailed, k)
+		}
+	}
+	nodesDetached := []string{}
+	c.updateNadAnnotations(nad, nodesAttached, nodesAttachFailed, nodesDetached)
 	return nil
 }
 
@@ -317,19 +328,19 @@ func (c *TopologyController) handleNetworkDetach(nad *netattachdef.NetworkAttach
 		overlays = append(overlays, overlay)
 	}
 	for _, v := range overlays {
-		vlanIds, _ := getVlanIds(v["vlanRange"])
 		project := v["extProjectID"]
 		network := v["extNetworkID"]
-		_, err := c.vlanProvider.Detach(project, network, vlanIds, nodesInfo, action)
+		vlanRange := v["vlanRange"]
+		_, err := c.vlanProvider.Detach(project, network, vlanRange, nodesInfo, action)
 		if err != nil {
-			klog.Errorf("Plugin Detach for vlan %v failed: %s", vlanIds, err.Error())
+			klog.Errorf("Plugin Detach for vlan %s failed: %s", vlanRange, err.Error())
 		}
+	}
 
-		if action != datatypes.DeleteDetach {
-			nodesAttached := []string{}
-			nodesAttachFailed := []string{}
-			c.updateNadAnnotations(nad, nodesAttached, nodesAttachFailed, nodesDetached)
-		}
+	if action != datatypes.DeleteDetach {
+		nodesAttached := []string{}
+		nodesAttachFailed := []string{}
+		c.updateNadAnnotations(nad, nodesAttached, nodesAttachFailed, nodesDetached)
 	}
 	return nil
 }
@@ -377,9 +388,9 @@ func (c *TopologyController) processNadItem(workItem WorkItem) error {
 		}
 	case datatypes.UpdateAttachDetach:
 		{
-			annotationsMap := workItem.oldNad.GetAnnotations()
 			var networkStatus NetworkStatus
 			networkStatus = make(map[string][]string)
+			annotationsMap := workItem.oldNad.GetAnnotations()
 			jsonString, ok := annotationsMap[datatypes.NetworkStatusKey]
 			if ok && len(jsonString) > 0 {
 				json.Unmarshal([]byte(jsonString), &networkStatus)
@@ -435,7 +446,6 @@ func (c *TopologyController) processNadItem(workItem WorkItem) error {
 }
 
 func (c *TopologyController) processNodeItem(workItem WorkItem) error {
-	var err error
 	klog.Infof("processNodeItem invoked for %s", workItem.node.ObjectMeta.Name)
 	nadList, err := c.netAttachDefClientSet.K8sCniCncfIoV1().NetworkAttachmentDefinitions("").List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
@@ -450,7 +460,7 @@ func (c *TopologyController) processNodeItem(workItem WorkItem) error {
 				name := nad.ObjectMeta.Name
 				namespace := nad.ObjectMeta.Namespace
 				klog.Infof("Checking NAD %s/%s", namespace, name)
-				_, trigger := c.shouldTriggerAction(&nad)
+				_, trigger, _ := datatypes.ShouldTriggerTopoAction(&nad)
 				if !trigger {
 					continue
 				}
@@ -479,7 +489,7 @@ func (c *TopologyController) processNodeItem(workItem WorkItem) error {
 				name := nad.ObjectMeta.Name
 				namespace := nad.ObjectMeta.Namespace
 				klog.Infof("Checking NAD %s/%s", namespace, name)
-				_, trigger := c.shouldTriggerAction(&nad)
+				_, trigger, _ := datatypes.ShouldTriggerTopoAction(&nad)
 				if !trigger {
 					continue
 				}
@@ -508,7 +518,7 @@ func (c *TopologyController) processNodeItem(workItem WorkItem) error {
 				name := nad.ObjectMeta.Name
 				namespace := nad.ObjectMeta.Namespace
 				klog.Infof("Checking NAD %s/%s", namespace, name)
-				_, trigger := c.shouldTriggerAction(&nad)
+				_, trigger, _ := datatypes.ShouldTriggerTopoAction(&nad)
 				if !trigger {
 					continue
 				}
