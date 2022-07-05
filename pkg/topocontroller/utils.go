@@ -100,8 +100,8 @@ func (c *TopologyController) updateNadAnnotations(nad *netattachdef.NetworkAttac
 					if !nodeExists {
 						networkStatus["attached"] = append(networkStatus["attached"], n)
 					}
-					for k, w := range networkStatus["attachment-failed"] {
-						if n == w {
+					for k, v := range networkStatus["attachment-failed"] {
+						if n == v {
 							networkStatus["attachment-failed"] = append(networkStatus["attachment-failed"][:k], networkStatus["attachment-failed"][k+1:]...)
 							break
 						}
@@ -120,8 +120,8 @@ func (c *TopologyController) updateNadAnnotations(nad *netattachdef.NetworkAttac
 					if !nodeExists {
 						networkStatus["attachment-failed"] = append(networkStatus["attachment-failed"], n)
 					}
-					for k, w := range networkStatus["attached"] {
-						if n == w {
+					for k, v := range networkStatus["attached"] {
+						if n == v {
 							networkStatus["attached"] = append(networkStatus["attached"][:k], networkStatus["attached"][k+1:]...)
 							break
 						}
