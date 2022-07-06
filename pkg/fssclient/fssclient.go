@@ -685,16 +685,17 @@ func (f *FssClient) AttachSubnetInterface(fssSubnetId string, vlanId int, hostPo
 
 func (f *FssClient) DeleteSubnetInterface(fssSubnetId string, vlanId int, hostPortLabelID string) error {
 	klog.Infof("Delete hostPortLabel %s for fssSubnetId %s and vlanId %d", hostPortLabelID, fssSubnetId, vlanId)
+        var return_code error = nil
 	_, ok := f.database.attachedLabels[fssSubnetId][vlanId]
 	if ok && hostPortLabelID == f.database.attachedLabels[fssSubnetId][vlanId] {
 		// HostPortLabel: When deleting a HostPortLabel, the associations to Subnet and HostPort are automatically deleted.
 		u := hostPortLabelPath + "/" + hostPortLabelID
 		statusCode, _, err := f.DELETE(u)
 		if err != nil {
-			return err
+			return_code = err
 		}
 		if statusCode != 204 {
-			return fmt.Errorf("Delete hostPortLabel failed with code %d", statusCode)
+			return_code = fmt.Errorf("Delete hostPortLabel failed with code %d", statusCode)
 		}
 		klog.Infof("HostPortLabel %s is deleted", hostPortLabelID)
 	} else {
@@ -704,7 +705,7 @@ func (f *FssClient) DeleteSubnetInterface(fssSubnetId string, vlanId int, hostPo
 	delete(f.database.hostPortLabels[fssSubnetId], vlanId)
 	delete(f.database.attachedLabels[fssSubnetId], vlanId)
 	delete(f.database.attachedPorts, hostPortLabelID)
-	return nil
+	return return_code
 }
 
 func (f *FssClient) AttachHostPort(hostPortLabelID string, node string, port string, nodeCreated bool) error {
@@ -772,6 +773,7 @@ func (f *FssClient) AttachHostPort(hostPortLabelID string, node string, port str
 }
 
 func (f *FssClient) DetachHostPort(hostPortLabelID string, node string, port string, nodeDeleted bool) error {
+        var return_code error = nil
 	// Check if port exists
 	hostPortID, ok := f.database.hostPorts[node][port]
 	if ok {
@@ -781,10 +783,10 @@ func (f *FssClient) DetachHostPort(hostPortLabelID string, node string, port str
 				u := hostPortAssociationPath + "/" + hostPortAssociationID
 				statusCode, _, err := f.DELETE(u)
 				if err != nil {
-					return err
+					return_code = err
 				}
 				if statusCode != 204 {
-					return fmt.Errorf("Delete HostPortAssociation failed with code %d", statusCode)
+					return_code = fmt.Errorf("Delete HostPortAssociation failed with code %d", statusCode)
 				}
 				klog.Infof("HostPortAssociation %s is deleted", hostPortAssociationID)
 				// Remove locally
@@ -795,5 +797,5 @@ func (f *FssClient) DetachHostPort(hostPortLabelID string, node string, port str
 	if nodeDeleted {
 		delete(f.database.hostPorts, node)
 	}
-	return nil
+	return return_code
 }
