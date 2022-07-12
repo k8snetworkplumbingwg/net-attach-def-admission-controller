@@ -64,14 +64,10 @@ func (p *FssVlanProvider) Attach(fssWorkloadEvpnId, fssSubnetId, vlanRange strin
 		if err != nil {
 			return nodesStatus, err
 		}
-		nodeCreated := false
-		if requestType == datatypes.NodeAttach {
-			nodeCreated = true
-		}
 		for k, v := range nodesInfo {
 			for i, _ := range v {
 				klog.Infof("Attach step 2a: attach hostPortLabel for vlan %d to host %s port %s", vlanId, k, i)
-				err := p.fssClient.AttachHostPort(hostPortLabelID, k, i, nodeCreated)
+				err := p.fssClient.AttachHostPort(hostPortLabelID, k, i)
 				nodesStatus[k] = err
 			}
 		}
@@ -106,15 +102,17 @@ func (p *FssVlanProvider) Detach(fssWorkloadEvpnId, fssSubnetId, vlanRange strin
 				return nodesStatus, err
 			}
 		} else {
-			nodeDeleted := false
-			if requestType == datatypes.NodeDetach {
-				nodeDeleted = true
-			}
 			for k, v := range nodesInfo {
 				for i, _ := range v {
 					klog.Infof("Detach step 2a: detach vlan %d from host %s port %s", vlanId, k, i)
-					err := p.fssClient.DetachHostPort(hostPortLabelID, k, i, nodeDeleted)
+					err := p.fssClient.DetachHostPort(hostPortLabelID, k, i)
 					nodesStatus[k] = err
+				}
+			}
+			if requestType == datatypes.NodeDetach {
+				for k, _ := range nodesInfo {
+					klog.Infof("Detach step 2b: delete host %s", k)
+					p.fssClient.DetachHost(k)
 				}
 			}
 		}

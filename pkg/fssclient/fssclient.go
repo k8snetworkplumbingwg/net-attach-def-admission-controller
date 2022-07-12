@@ -685,7 +685,7 @@ func (f *FssClient) AttachSubnetInterface(fssSubnetId string, vlanId int, hostPo
 
 func (f *FssClient) DeleteSubnetInterface(fssSubnetId string, vlanId int, hostPortLabelID string) error {
 	klog.Infof("Delete hostPortLabel %s for fssSubnetId %s and vlanId %d", hostPortLabelID, fssSubnetId, vlanId)
-        var return_code error = nil
+	var return_code error = nil
 	_, ok := f.database.attachedLabels[fssSubnetId][vlanId]
 	if ok && hostPortLabelID == f.database.attachedLabels[fssSubnetId][vlanId] {
 		// HostPortLabel: When deleting a HostPortLabel, the associations to Subnet and HostPort are automatically deleted.
@@ -708,7 +708,7 @@ func (f *FssClient) DeleteSubnetInterface(fssSubnetId string, vlanId int, hostPo
 	return return_code
 }
 
-func (f *FssClient) AttachHostPort(hostPortLabelID string, node string, port string, nodeCreated bool) error {
+func (f *FssClient) AttachHostPort(hostPortLabelID string, node string, port string) error {
 	hostPorts, ok := f.database.hostPorts[node]
 	if !ok {
 		f.database.hostPorts[node] = make(HostPortIDByName)
@@ -772,8 +772,8 @@ func (f *FssClient) AttachHostPort(hostPortLabelID string, node string, port str
 	return nil
 }
 
-func (f *FssClient) DetachHostPort(hostPortLabelID string, node string, port string, nodeDeleted bool) error {
-        var return_code error = nil
+func (f *FssClient) DetachHostPort(hostPortLabelID string, node string, port string) error {
+	var return_code error = nil
 	// Check if port exists
 	hostPortID, ok := f.database.hostPorts[node][port]
 	if ok {
@@ -794,8 +794,9 @@ func (f *FssClient) DetachHostPort(hostPortLabelID string, node string, port str
 			}
 		}
 	}
-	if nodeDeleted {
-		delete(f.database.hostPorts, node)
-	}
 	return return_code
+}
+
+func (f *FssClient) DetachHost(node string) {
+	delete(f.database.hostPorts, node)
 }
