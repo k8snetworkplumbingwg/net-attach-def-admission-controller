@@ -424,59 +424,36 @@ func NewFssClient(k8sClientSet kubernetes.Interface, podNamespace string, cfg *A
 	if firstRun {
 		f.TxnDone()
 	} else {
-		if cfg.Restartmode == "cache" {
-			klog.Infof("Load tenant data from last run")
-			var database Database
-			jsonString := f.getConfigMap("database")
-			if len(jsonString) > 0 {
-				database, err = database.decode(jsonString)
-				if err == nil {
-					f.database = database
-				}
+		klog.Infof("Load tenant data from last run")
+		var database Database
+		jsonString := f.getConfigMap("database")
+		if len(jsonString) > 0 {
+			database, err = database.decode(jsonString)
+			if err == nil {
+				f.database = database
 			}
-		} else {
-			klog.Infof("Fetch tenant data from server")
+		}
+		if cfg.Restartmode == "resync" {
+			klog.Infof("Resync tenant data with server")
 			err = f.Resync(f.deployment.ID)
 			if err != nil {
-				return nil, fmt.Errorf("Resync with server failed: %s", err.Error())
+				klog.Warningf("Resync with server failed: %s", err.Error())
 			}
-			f.TxnDone()
 		}
 	}
 	return f, nil
 }
 
+/*
+HostPortLabel: When deleting a HostPortLabel, the associations to Subnet and HostPort are automatically deleted.
+HostPort: When deleting a HostPort, the associations to HostPortLabel are automatically deleted.
+Subnet: When deleting a Subnet, the associations to HostPortLabel are automatically deleted.
+Tenant: When deleting a Tenant, the subnets connected to this Tenant are automatically deleted.
+Resync path: hostPortlabels, hostPorts, tenants
+*/
 func (f *FssClient) Resync(deploymentID string) error {
-	// Get and save tenants
-	statusCode, jsonResponse, err := f.GET(tenantPath)
-	if err != nil || statusCode != 200 {
-		klog.Errorf("Get tenants failed: %s", err.Error())
-		return err
-	}
-	var tenants Tenants
-	json.Unmarshal(jsonResponse, &tenants)
-	for _, v := range tenants {
-		if v.DeploymentID == deploymentID {
-			f.database.tenants[v.FssWorkloadEvpnID] = v
-		}
-	}
-	// Get and save subnets
-	statusCode, jsonResponse, err = f.GET(subnetPath)
-	if err != nil || statusCode != 200 {
-		klog.Errorf("Get subnets failed: %s", err.Error())
-		return err
-	}
-	var subnets Subnets
-	json.Unmarshal(jsonResponse, &subnets)
-	for _, v := range subnets {
-		if v.DeploymentID == deploymentID {
-			f.database.subnets[v.FssSubnetID] = v
-			f.database.hostPortLabels[v.FssSubnetID] = make(HostPortLabelIDByVlan)
-			f.database.attachedLabels[v.FssSubnetID] = make(HostPortLabelIDByVlan)
-		}
-	}
-	// Get and save hostPortLabels
-	statusCode, jsonResponse, err = f.GET(hostPortLabelPath)
+	// Check hostPortLabels
+	statusCode, jsonResponse, err := f.GET(hostPortLabelPath)
 	if err != nil || statusCode != 200 {
 		klog.Errorf("Get hostPortLabels failed: %s", err.Error())
 		return err
@@ -487,20 +464,29 @@ func (f *FssClient) Resync(deploymentID string) error {
 		if v.DeploymentID != deploymentID {
 			continue
 		}
-		names := strings.Split(v.Name, "-")
-		if len(names) != 3 || names[0] != "label" {
-			continue
+		// Check if object is known
+		knownObject := false
+		for _, v1 := range f.database.hostPortLabels {
+			for _, v2 := range v1 {
+				if v.ID == v2 {
+					knownObject = true
+					break
+				}
+			}
 		}
-		fssSubnetID := names[1]
-		if _, ok := f.database.subnets[fssSubnetID]; !ok {
-			continue
-		}
-		vlanID, err := strconv.Atoi(names[2])
-		if err == nil {
-			f.database.hostPortLabels[fssSubnetID][vlanID] = v.ID
+		// Delete unknown object
+		if !knownObject {
+			u := hostPortLabelPath + "/" + v.ID
+			klog.Warningf("Delete unknown hostPortLabel in server: %s", u)
+			statusCode, _, err := f.DELETE(u)
+			if err != nil {
+				klog.Errorf("Delete hostPortLabel failed: %s", err.Error())
+			} else if statusCode != 204 {
+				klog.Errorf("Delete hostPortLabel failed with code: %d", statusCode)
+			}
 		}
 	}
-	// Get and save hostPorts
+	// Check hostPorts
 	statusCode, jsonResponse, err = f.GET(hostPortPath)
 	if err != nil || statusCode != 200 {
 		klog.Errorf("Get hostPorts failed: %s", err.Error())
@@ -510,42 +496,57 @@ func (f *FssClient) Resync(deploymentID string) error {
 	json.Unmarshal(jsonResponse, &hostPorts)
 	for _, v := range hostPorts {
 		if v.DeploymentID == deploymentID {
-			if _, ok := f.database.hostPorts[v.HostName]; !ok {
-				f.database.hostPorts[v.HostName] = make(HostPortIDByName)
+			// Check if object is known
+			knownObject := false
+			for _, v1 := range f.database.hostPorts {
+				for _, v2 := range v1 {
+					if v.ID == v2 {
+						knownObject = true
+						break
+					}
+				}
 			}
-			f.database.hostPorts[v.HostName][v.PortName] = v.ID
+			// Delete unknown object
+			if !knownObject {
+				u := hostPortPath + "/" + v.ID
+				klog.Warningf("Delete unknown hostPort in server: %s", u)
+				statusCode, _, err := f.DELETE(u)
+				if err != nil {
+					klog.Errorf("Delete hostPort failed: %s", err.Error())
+				} else if statusCode != 204 {
+					klog.Errorf("Delete hostPort failed with code: %d", statusCode)
+				}
+			}
 		}
 	}
-	// Get and save hostPortAssociations
-	statusCode, jsonResponse, err = f.GET(hostPortAssociationPath)
+	// Check tenants
+	statusCode, jsonResponse, err = f.GET(tenantPath)
 	if err != nil || statusCode != 200 {
-		klog.Errorf("Get hostPortAssociations failed: %s", err.Error())
+		klog.Errorf("Get tenants failed: %s", err.Error())
 		return err
 	}
-	var hostPortAssociations HostPortAssociations
-	json.Unmarshal(jsonResponse, &hostPortAssociations)
-	for _, v := range hostPortAssociations {
+	var tenants Tenants
+	json.Unmarshal(jsonResponse, &tenants)
+	for _, v := range tenants {
 		if v.DeploymentID == deploymentID {
-			portAssociation := make(HostPortAssociationIDByPort)
-			portAssociation[v.HostPortID] = v.ID
-			f.database.attachedPorts[v.HostPortLabelID] = append(f.database.attachedPorts[v.HostPortLabelID], portAssociation)
-		}
-	}
-	// Get subnetAssociations
-	statusCode, jsonResponse, err = f.GET(subnetAssociationPath)
-	if err != nil || statusCode != 200 {
-		klog.Errorf("Get subnetAssociations failed: %s", err.Error())
-		return err
-	}
-	var subnetAssociations SubnetAssociations
-	json.Unmarshal(jsonResponse, &subnetAssociations)
-	for _, v := range subnetAssociations {
-		if v.DeploymentID != deploymentID {
-			continue
-		}
-		for k2, v2 := range f.database.hostPortLabels {
-			if v2[v.VlanID] == v.HostPortLabelID {
-				f.database.attachedLabels[k2][v.VlanID] = v.HostPortLabelID
+			// Check if object is known
+			knownObject := false
+			for _, v1 := range f.database.tenants {
+				if v.ID == v1.ID {
+					knownObject = true
+					break
+				}
+			}
+			// Delete unknown object
+			if !knownObject {
+				u := tenantPath + "/" + v.ID
+				klog.Warningf("Delete unknown tenant in server: %s", u)
+				statusCode, _, err := f.DELETE(u)
+				if err != nil {
+					klog.Errorf("Delete tenant failed: %s", err.Error())
+				} else if statusCode != 204 {
+					klog.Errorf("Delete tenant failed with code: %d", statusCode)
+				}
 			}
 		}
 	}
@@ -693,8 +694,7 @@ func (f *FssClient) DeleteSubnetInterface(fssSubnetId string, vlanId int, hostPo
 		statusCode, _, err := f.DELETE(u)
 		if err != nil {
 			return_code = err
-		}
-		if statusCode != 204 {
+		} else if statusCode != 204 {
 			return_code = fmt.Errorf("Delete hostPortLabel failed with code %d", statusCode)
 		}
 		klog.Infof("HostPortLabel %s is deleted", hostPortLabelID)

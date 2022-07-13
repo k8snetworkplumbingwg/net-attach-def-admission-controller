@@ -33,7 +33,7 @@ func (p *FssVlanProvider) Connect(k8sClientSet kubernetes.Interface, podNamespac
 	var fData io.Reader
 	fData = f
 	var fssConfig FssConfig
-	fssConfig.Global.Restartmode = "cache"
+	fssConfig.Global.Restartmode = "resync"
 	err = gcfg.FatalOnly(gcfg.ReadInto(&fssConfig, fData))
 	if err != nil {
 		return err
