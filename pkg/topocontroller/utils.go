@@ -347,6 +347,8 @@ func (c *TopologyController) handleNetworkDetach(nad *netattachdef.NetworkAttach
 
 func (c *TopologyController) processNadItem(workItem WorkItem) error {
 	klog.Infof("processNadItem invoked for %s/%s", workItem.newNad.ObjectMeta.Name, workItem.newNad.ObjectMeta.Namespace)
+	var err error
+	// Note: no return inside the switch block
 	switch workItem.action {
 	case datatypes.CreateAttach, datatypes.UpdateAttach:
 		{
@@ -355,17 +357,16 @@ func (c *TopologyController) processNadItem(workItem WorkItem) error {
 			nodes, err := c.k8sClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{LabelSelector: ns})
 			if err != nil {
 				klog.Errorf("Get matching nodes failed: %s", err.Error())
-				return err
+				break
 			}
 			if len(nodes.Items) == 0 {
 				klog.Infof("No matching node found")
-				return nil
+				break
 			}
 			err = c.handleNetworkAttach(workItem.newNad, nodes.Items, workItem.action)
 			if err != nil {
 				klog.Errorf("handleNetworkAttach failed because %s", err.Error())
 			}
-			return err
 		}
 	case datatypes.DeleteDetach, datatypes.UpdateDetach:
 		{
@@ -374,17 +375,16 @@ func (c *TopologyController) processNadItem(workItem WorkItem) error {
 			nodes, err := c.k8sClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{LabelSelector: ns})
 			if err != nil {
 				klog.Errorf("Get matching nodes failed: %s", err.Error())
-				return err
+				break
 			}
 			if workItem.action == datatypes.UpdateDetach && len(nodes.Items) == 0 {
 				klog.Infof("No matching node found")
-				return nil
+				break
 			}
 			err = c.handleNetworkDetach(workItem.oldNad, nodes.Items, workItem.action)
 			if err != nil {
 				klog.Errorf("handleNetworkDetach failed because %s", err.Error())
 			}
-			return err
 		}
 	case datatypes.UpdateAttachDetach:
 		{
@@ -433,15 +433,15 @@ func (c *TopologyController) processNadItem(workItem WorkItem) error {
 					}
 				}
 				if len(nodesToAttach) > 0 {
-					err := c.handleNetworkAttach(workItem.newNad, nodesToAttach, workItem.action)
+					err = c.handleNetworkAttach(workItem.newNad, nodesToAttach, workItem.action)
 					if err != nil {
 						klog.Errorf("handleNetworkAttach failed because %s", err.Error())
 					}
-					return err
 				}
 			}
 		}
 	}
+	c.vlanProvider.TxnDone()
 	return nil
 }
 
@@ -452,6 +452,7 @@ func (c *TopologyController) processNodeItem(workItem WorkItem) error {
 		klog.Errorf("List network attachment definitions failed because %s", err.Error())
 		return err
 	}
+	// Note: no return inside the switch block
 	switch workItem.action {
 	case datatypes.NodeAttach:
 		{
@@ -510,6 +511,7 @@ func (c *TopologyController) processNodeItem(workItem WorkItem) error {
 					klog.Errorf("handleNetworkDetach failed because %s", err.Error())
 				}
 			}
+			c.vlanProvider.DeleteNode(workItem.node.ObjectMeta.Name)
 		}
 	case datatypes.NodeAttachDetach:
 		{
@@ -563,5 +565,6 @@ func (c *TopologyController) processNodeItem(workItem WorkItem) error {
 			}
 		}
 	}
+	c.vlanProvider.TxnDone()
 	return err
 }

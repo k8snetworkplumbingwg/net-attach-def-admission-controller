@@ -184,10 +184,9 @@ func (f *FssClient) setConfigMap(name string, data []byte) error {
 	return err
 }
 
-func (f *FssClient) TxnDone() error {
+func (f *FssClient) TxnDone() {
 	jsonString := f.database.encode()
-	err := f.setConfigMap("database", jsonString)
-	return err
+	f.setConfigMap("database", jsonString)
 }
 
 func (f *FssClient) login(loginURL string) error {
@@ -797,6 +796,6 @@ func (f *FssClient) DetachHostPort(hostPortLabelID string, node string, port str
 	return return_code
 }
 
-func (f *FssClient) DetachHost(node string) {
-	delete(f.database.hostPorts, node)
+func (f *FssClient) DetachNode(nodeName string) {
+	delete(f.database.hostPorts, nodeName)
 }

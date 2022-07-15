@@ -197,3 +197,9 @@ func (p *OpenstackVlanProvider) Detach(project, network, vlanRange string, nodes
 	nodesStatus := make(map[string]error)
 	return nodesStatus, nil
 }
+
+func (p *OpenstackVlanProvider) DeleteNode(nodeName string) {
+}
+
+func (p *OpenstackVlanProvider) TxnDone() {
+}

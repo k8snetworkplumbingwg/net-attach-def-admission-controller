@@ -79,7 +79,6 @@ func (p *FssVlanProvider) Attach(fssWorkloadEvpnId, fssSubnetId, vlanRange strin
 			}
 		}
 	}
-	p.fssClient.TxnDone()
 	return nodesStatus, nil
 }
 
@@ -109,14 +108,15 @@ func (p *FssVlanProvider) Detach(fssWorkloadEvpnId, fssSubnetId, vlanRange strin
 					nodesStatus[k] = err
 				}
 			}
-			if requestType == datatypes.NodeDetach {
-				for k, _ := range nodesInfo {
-					klog.Infof("Detach step 2b: delete host %s", k)
-					p.fssClient.DetachHost(k)
-				}
-			}
 		}
 	}
-	p.fssClient.TxnDone()
 	return nodesStatus, nil
+}
+
+func (p *FssVlanProvider) DeleteNode(nodeName string) {
+	p.fssClient.DetachNode(nodeName)
+}
+
+func (p *FssVlanProvider) TxnDone() {
+	p.fssClient.TxnDone()
 }
