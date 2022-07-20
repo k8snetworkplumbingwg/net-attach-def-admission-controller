@@ -100,9 +100,8 @@ func (c *TopologyController) handleNodeAddEvent(obj interface{}) {
 		klog.Error("invalid API object received")
 		return
 	}
-	klog.Infof("Handle NODE CREATE %s", node.ObjectMeta.Name)
-	workItem := WorkItem{action: datatypes.NodeAttach, node: node}
-	c.workqueue.Add(workItem)
+	klog.Infof("Received NODE CREATE %s", node.ObjectMeta.Name)
+	// Event is handled in NODE UPDATE upon node toplogy is annotated by the node agent
 }
 
 func (c *TopologyController) handleNodeDeleteEvent(obj interface{}) {
@@ -134,24 +133,34 @@ func (c *TopologyController) handleNodeUpdateEvent(oldObj, newObj interface{}) {
 		klog.Error("invalid new API object received")
 		return
 	}
-	// Check node annotation change on nokia.com/network-topology, relevant for Openstack only
+	// Check node annotation change on nokia.com/network-topology
+	anno1 := oldNode.GetAnnotations()
+	topo1, _ := anno1[datatypes.NetworkTopologyKey]
 	anno := newNode.GetAnnotations()
 	topo, ok := anno[datatypes.NetworkTopologyKey]
-	if ok {
+	if !ok {
+		return
+	}
+	if topo1 != topo {
+		// No-op for BM
 		updated, err := c.vlanProvider.UpdateNodeTopology(newNode.ObjectMeta.Name, topo)
 		if err != nil {
 			klog.Errorf("Update node topology failed because %s", err.Error())
-		} else {
-			if updated != topo {
-				klog.Infof("Node %s topology updated", newNode.ObjectMeta.Name)
-				anno[datatypes.NetworkTopologyKey] = updated
-				newNode.SetAnnotations(anno)
-				_, err = c.k8sClientSet.CoreV1().Nodes().Update(context.TODO(), newNode, metav1.UpdateOptions{})
-				if err != nil {
-					klog.Errorf("Update node annotation failed because %s", err.Error())
-				}
+			return
+		}
+		if updated != topo {
+			klog.Infof("Node %s topology updated", newNode.ObjectMeta.Name)
+			anno[datatypes.NetworkTopologyKey] = updated
+			newNode.SetAnnotations(anno)
+			_, err = c.k8sClientSet.CoreV1().Nodes().Update(context.TODO(), newNode, metav1.UpdateOptions{})
+			if err != nil {
+				klog.Errorf("Update node annotation failed because %s", err.Error())
+				return
 			}
 		}
+		klog.Infof("Handle NODE CREATE %s", newNode.ObjectMeta.Name)
+		workItem := WorkItem{action: datatypes.NodeAttach, node: newNode}
+		c.workqueue.Add(workItem)
 	}
 	// Check node label change
 	oldNodeLabels := oldNode.GetLabels()
@@ -179,7 +188,7 @@ func (c *TopologyController) handleNetAttachDefAddEvent(obj interface{}) {
 	// Check NAD for action
 	_, trigger, err := datatypes.ShouldTriggerTopoAction(nad)
 	if err != nil || !trigger {
-		klog.Infof("not an action triggering nad, ignored")
+		klog.Infof("%s/%s is not an action triggering nad: ignored", namespace, name)
 		return
 	}
 	// Handle network attach
@@ -201,7 +210,7 @@ func (c *TopologyController) handleNetAttachDefDeleteEvent(obj interface{}) {
 	// Check NAD for action
 	_, trigger, err := datatypes.ShouldTriggerTopoAction(nad)
 	if err != nil || !trigger {
-		klog.Infof("not an action triggering nad, ignored")
+		klog.Infof("%s/%s is not an action triggering nad: ignored", namespace, name)
 		return
 	}
 	// Handle network detach
@@ -233,6 +242,7 @@ func (c *TopologyController) handleNetAttachDefUpdateEvent(oldObj, newObj interf
 	// Check NAD for action
 	updateAction, err := datatypes.ShouldTriggerTopoUpdate(oldNad, newNad)
 	if err != nil || updateAction == 0 {
+		klog.Infof("%s/%s does not have an action triggering update: ignored", namespace, name)
 		return
 	}
 	workItem := WorkItem{action: updateAction, oldNad: oldNad, newNad: newNad}

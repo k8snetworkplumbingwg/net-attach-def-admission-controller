@@ -198,7 +198,7 @@ func (p *OpenstackVlanProvider) Detach(project, network, vlanRange string, nodes
 	return nodesStatus, nil
 }
 
-func (p *OpenstackVlanProvider) DeleteNode(nodeName string) {
+func (p *OpenstackVlanProvider) DetachNode(nodeName string) {
 }
 
 func (p *OpenstackVlanProvider) TxnDone() {

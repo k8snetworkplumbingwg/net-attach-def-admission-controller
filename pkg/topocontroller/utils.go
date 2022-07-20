@@ -511,7 +511,7 @@ func (c *TopologyController) processNodeItem(workItem WorkItem) error {
 					klog.Errorf("handleNetworkDetach failed because %s", err.Error())
 				}
 			}
-			c.vlanProvider.DeleteNode(workItem.node.ObjectMeta.Name)
+			c.vlanProvider.DetachNode(workItem.node.ObjectMeta.Name)
 		}
 	case datatypes.NodeAttachDetach:
 		{

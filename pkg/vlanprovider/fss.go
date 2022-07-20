@@ -113,7 +113,7 @@ func (p *FssVlanProvider) Detach(fssWorkloadEvpnId, fssSubnetId, vlanRange strin
 	return nodesStatus, nil
 }
 
-func (p *FssVlanProvider) DeleteNode(nodeName string) {
+func (p *FssVlanProvider) DetachNode(nodeName string) {
 	p.fssClient.DetachNode(nodeName)
 }
 

@@ -12,7 +12,7 @@ type VlanProvider interface {
 	UpdateNodeTopology(string, string) (string, error)
 	Attach(string, string, string, map[string]datatypes.NicMap, datatypes.NadAction) (map[string]error, error)
 	Detach(string, string, string, map[string]datatypes.NicMap, datatypes.NadAction) (map[string]error, error)
-	DeleteNode(string)
+	DetachNode(string)
 	TxnDone()
 }
 
