@@ -7,12 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"k8s.io/klog"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"k8s.io/klog"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -222,11 +223,14 @@ func (f *FssClient) login(loginURL string) error {
 	}
 	defer response.Body.Close()
 	jsonRespData, err := ioutil.ReadAll(response.Body)
-	if err != nil || response.StatusCode != 200 {
+	if err != nil {
+		return err
+	}
+	if response.StatusCode != 200 {
 		var errorResponse ErrorResponse
 		json.Unmarshal(jsonRespData, &errorResponse)
 		klog.Errorf("Login error: %+v", errorResponse)
-		return fmt.Errorf("Login failed with status=%d: %s", response.StatusCode, err.Error())
+		return fmt.Errorf("Login failed with status=%d", response.StatusCode)
 	}
 	var result LoginResponse
 	err = json.Unmarshal(jsonRespData, &result)
@@ -298,7 +302,10 @@ func NewFssClient(k8sClientSet kubernetes.Interface, podNamespace string, cfg *A
 			// Validate with Connect Core
 			u := pluginPath + "/" + plugin.ID
 			statusCode, _, err := f.GET(u)
-			if err != nil || statusCode != 200 {
+			if err != nil {
+				return nil, err
+			}
+			if statusCode != 200 {
 				klog.Infof("Last plugin is not longer valid")
 				firstRun = true
 			} else {
@@ -321,7 +328,10 @@ func NewFssClient(k8sClientSet kubernetes.Interface, podNamespace string, cfg *A
 				// Validate with Connect Core
 				u := deploymentPath + "/" + deployment.ID
 				statusCode, _, err := f.GET(u)
-				if err != nil || statusCode != 200 {
+				if err != nil {
+					return nil, err
+				}
+				if statusCode != 200 {
 					klog.Infof("Last deployment is not longer valid")
 				} else {
 					klog.Infof("Last deployment is still valid")
@@ -343,11 +353,14 @@ func NewFssClient(k8sClientSet kubernetes.Interface, podNamespace string, cfg *A
 		}
 		jsonRequest, _ := json.Marshal(f.plugin)
 		statusCode, jsonResponse, err := f.POST(pluginPath, jsonRequest)
-		if err != nil || statusCode != 201 {
+		if err != nil {
+			return nil, err
+		}
+		if statusCode != 201 {
 			var errorResponse ErrorResponse
 			json.Unmarshal(jsonResponse, &errorResponse)
 			klog.Errorf("Plugin error: %+v", errorResponse)
-			return nil, fmt.Errorf("Create plugin failed with status=%d: %s", statusCode, err.Error())
+			return nil, fmt.Errorf("Create plugin failed with status=%d", statusCode)
 		}
 		json.Unmarshal(jsonResponse, &f.plugin)
 		klog.Infof("Plugin created: %+v", f.plugin)
@@ -366,11 +379,14 @@ func NewFssClient(k8sClientSet kubernetes.Interface, podNamespace string, cfg *A
 		}
 		jsonRequest, _ := json.Marshal(f.deployment)
 		statusCode, jsonResponse, err := f.POST(deploymentPath, jsonRequest)
-		if err != nil || statusCode != 201 {
+		if err != nil {
+			return nil, err
+		}
+		if statusCode != 201 {
 			var errorResponse ErrorResponse
 			json.Unmarshal(jsonResponse, &errorResponse)
 			klog.Errorf("Deployment error: %+v", errorResponse)
-			return nil, fmt.Errorf("Create deployment failed with status=%d: %s", statusCode, err.Error())
+			return nil, fmt.Errorf("Create deployment failed with status=%d", statusCode)
 		}
 		json.Unmarshal(jsonResponse, &f.deployment)
 		klog.Infof("Deployment created: %+v", f.deployment)
@@ -387,8 +403,11 @@ func NewFssClient(k8sClientSet kubernetes.Interface, podNamespace string, cfg *A
 		for !f.deployment.AdminUp {
 			time.Sleep(10 * time.Second)
 			statusCode, jsonResponse, err := f.GET(path)
-			if err != nil || statusCode != 200 {
-				return nil, fmt.Errorf("Get deployment failed: %s", err.Error())
+			if err != nil {
+				return nil, err
+			}
+			if statusCode != 200 {
+				return nil, fmt.Errorf("Get deployment failed with status=%d", statusCode)
 			}
 			json.Unmarshal(jsonResponse, &f.deployment)
 			if f.deployment.AdminUp {
@@ -448,7 +467,10 @@ func (f *FssClient) Resync(firstRun bool, deploymentID string) error {
 		deploymentName := "ncs-" + f.cfg.Clustername
 		statusCode, jsonResponse, err := f.GET(deploymentPath)
 		if err != nil {
-			return fmt.Errorf("Get deployments failed with status=%d: %s", statusCode, err.Error())
+			return err
+		}
+		if statusCode != 200 {
+			return fmt.Errorf("Get deployments failed with status=%d", statusCode)
 		}
 		var deployments Deployments
 		json.Unmarshal(jsonResponse, &deployments)
@@ -456,7 +478,10 @@ func (f *FssClient) Resync(firstRun bool, deploymentID string) error {
 			if v.Name == deploymentName && v.ID != deploymentID {
 				// delete hostPortLabels
 				statusCode, jsonResponse, err := f.GET(hostPortLabelPath)
-				if err != nil || statusCode != 200 {
+				if err != nil {
+					return err
+				}
+				if statusCode != 200 {
 					klog.Errorf("Get hostPortLabels failed with status=%d: %s", statusCode, err.Error())
 				}
 				var hostPortLabels HostPortLabels
@@ -472,8 +497,11 @@ func (f *FssClient) Resync(firstRun bool, deploymentID string) error {
 				}
 				// delete hostPorts
 				statusCode, jsonResponse, err = f.GET(hostPortPath)
-				if err != nil || statusCode != 200 {
-					return fmt.Errorf("Get hostPorts failed with status=%d: %s", statusCode, err.Error())
+				if err != nil {
+					return err
+				}
+				if statusCode != 200 {
+					return fmt.Errorf("Get hostPorts failed with status=%d", statusCode)
 				}
 				var hostPorts HostPorts
 				json.Unmarshal(jsonResponse, &hostPorts)
@@ -489,8 +517,11 @@ func (f *FssClient) Resync(firstRun bool, deploymentID string) error {
 				}
 				// delete tenants
 				statusCode, jsonResponse, err = f.GET(tenantPath)
-				if err != nil || statusCode != 200 {
-					return fmt.Errorf("Get tenants failed with status=%d: %s", statusCode, err.Error())
+				if err != nil {
+					return err
+				}
+				if statusCode != 200 {
+					return fmt.Errorf("Get tenants failed with status=%d", statusCode)
 				}
 				var tenants Tenants
 				json.Unmarshal(jsonResponse, &tenants)
@@ -621,11 +652,14 @@ func (f *FssClient) CreateSubnetInterface(fssWorkloadEvpnId string, fssSubnetId 
 		}
 		jsonRequest, _ := json.Marshal(tenant)
 		statusCode, jsonResponse, err := f.POST(tenantPath, jsonRequest)
-		if err != nil || statusCode != 201 {
+		if err != nil {
+			return hostPortLabelID, err
+		}
+		if statusCode != 201 {
 			var errorResponse ErrorResponse
 			json.Unmarshal(jsonResponse, &errorResponse)
 			klog.Errorf("Tenant error: %+v", errorResponse)
-			return hostPortLabelID, fmt.Errorf("Create tenant failed with status=%d: %s", statusCode, err.Error())
+			return hostPortLabelID, fmt.Errorf("Create tenant failed with status=%d", statusCode)
 		}
 		json.Unmarshal(jsonResponse, &tenant)
 		klog.Infof("Tenant is created: %+v", tenant)
@@ -644,11 +678,14 @@ func (f *FssClient) CreateSubnetInterface(fssWorkloadEvpnId string, fssSubnetId 
 		}
 		jsonRequest, _ := json.Marshal(subnet)
 		statusCode, jsonResponse, err := f.POST(subnetPath, jsonRequest)
-		if err != nil || statusCode != 201 {
+		if err != nil {
+			return hostPortLabelID, err
+		}
+		if statusCode != 201 {
 			var errorResponse ErrorResponse
 			json.Unmarshal(jsonResponse, &errorResponse)
 			klog.Errorf("Subnet error: %+v", errorResponse)
-			return hostPortLabelID, fmt.Errorf("Create subnet failed with status=%d: %s", statusCode, err.Error())
+			return hostPortLabelID, fmt.Errorf("Create subnet failed with status=%d", statusCode)
 		}
 		json.Unmarshal(jsonResponse, &subnet)
 		klog.Infof("Subnet is created: %+v", subnet)
@@ -669,11 +706,14 @@ func (f *FssClient) CreateSubnetInterface(fssWorkloadEvpnId string, fssSubnetId 
 	}
 	jsonRequest, _ := json.Marshal(hostPortLabel)
 	statusCode, jsonResponse, err := f.POST(hostPortLabelPath, jsonRequest)
-	if err != nil || statusCode != 201 {
+	if err != nil {
+		return hostPortLabelID, err
+	}
+	if statusCode != 201 {
 		var errorResponse ErrorResponse
 		json.Unmarshal(jsonResponse, &errorResponse)
 		klog.Errorf("HostPortLabel error: %+v", errorResponse)
-		return hostPortLabelID, fmt.Errorf("Create hostPortLabel failed with status=%d: %s", statusCode, err.Error())
+		return hostPortLabelID, fmt.Errorf("Create hostPortLabel failed with status=%d", statusCode)
 	}
 	json.Unmarshal(jsonResponse, &hostPortLabel)
 	klog.Infof("HostPortLabel is created: %+v", hostPortLabel)
@@ -714,11 +754,14 @@ func (f *FssClient) AttachSubnetInterface(fssSubnetId string, vlanId int, hostPo
 	}
 	jsonRequest, _ := json.Marshal(subnetAssociation)
 	statusCode, jsonResponse, err := f.POST(subnetAssociationPath, jsonRequest)
-	if err != nil || statusCode != 201 {
+	if err != nil {
+		return err
+	}
+	if statusCode != 201 {
 		var errorResponse ErrorResponse
 		json.Unmarshal(jsonResponse, &errorResponse)
 		klog.Errorf("SubnetAssociation error: %+v", errorResponse)
-		return fmt.Errorf("Create SubnetAssociation failed with status=%d: %s", statusCode, err.Error())
+		return fmt.Errorf("Create SubnetAssociation failed with status=%d", statusCode)
 	}
 	json.Unmarshal(jsonResponse, &subnetAssociation)
 	klog.Infof("SubnetAssociation is created: %+v", subnetAssociation)
@@ -734,8 +777,11 @@ func (f *FssClient) DeleteSubnetInterface(fssSubnetId string, vlanId int, hostPo
 		// HostPortLabel: When deleting a HostPortLabel, the associations to Subnet and HostPort are automatically deleted.
 		u := hostPortLabelPath + "/" + hostPortLabelID
 		statusCode, _, err := f.DELETE(u)
-		if err != nil || statusCode != 204 {
-			result = fmt.Errorf("Delete hostPortLabel failed with status=%d: %s", statusCode, err.Error())
+		if err != nil {
+			return err
+		}
+		if statusCode != 204 {
+			result = fmt.Errorf("Delete hostPortLabel failed with status=%d", statusCode)
 		}
 		klog.Infof("HostPortLabel %s is deleted", hostPortLabelID)
 	} else {
@@ -765,11 +811,14 @@ func (f *FssClient) AttachHostPort(hostPortLabelID string, node string, port str
 		}
 		jsonRequest, _ := json.Marshal(hostPort)
 		statusCode, jsonResponse, err := f.POST(hostPortPath, jsonRequest)
-		if err != nil || statusCode != 201 {
+		if err != nil {
+			return err
+		}
+		if statusCode != 201 {
 			var errorResponse ErrorResponse
 			json.Unmarshal(jsonResponse, &errorResponse)
 			klog.Errorf("HostPort error: %+v", errorResponse)
-			return fmt.Errorf("Create hostPort failed with status=%d: %s", statusCode, err.Error())
+			return fmt.Errorf("Create hostPort failed with status=%d", statusCode)
 		}
 		json.Unmarshal(jsonResponse, &hostPort)
 		klog.Infof("HostPort is created: %+v", hostPort)
@@ -792,11 +841,14 @@ func (f *FssClient) AttachHostPort(hostPortLabelID string, node string, port str
 	}
 	jsonRequest, _ := json.Marshal(hostPortAssociation)
 	statusCode, jsonResponse, err := f.POST(hostPortAssociationPath, jsonRequest)
-	if err != nil || statusCode != 201 {
+	if err != nil {
+		return err
+	}
+	if statusCode != 201 {
 		var errorResponse ErrorResponse
 		json.Unmarshal(jsonResponse, &errorResponse)
 		klog.Errorf("HostPortAssociation error: %+v", errorResponse)
-		return fmt.Errorf("Create HostPortAssociation failed with status=%d: %s", statusCode, err.Error())
+		return fmt.Errorf("Create HostPortAssociation failed with status=%d", statusCode)
 	}
 	json.Unmarshal(jsonResponse, &hostPortAssociation)
 	klog.Infof("HostPortAssociation is created: %+v", hostPortAssociation)
@@ -816,8 +868,11 @@ func (f *FssClient) DetachHostPort(hostPortLabelID string, node string, port str
 			if hostPortAssociationID, ok := v[hostPortID]; ok {
 				u := hostPortAssociationPath + "/" + hostPortAssociationID
 				statusCode, _, err := f.DELETE(u)
-				if err != nil || statusCode != 204 {
-					result = fmt.Errorf("Delete HostPortAssociation failed with status=%d: %s", statusCode, err.Error())
+				if err != nil {
+					result = err
+				}
+				if statusCode != 204 {
+					result = fmt.Errorf("Delete HostPortAssociation failed with status=%d", statusCode)
 				}
 				klog.Infof("HostPortAssociation %s is deleted", hostPortAssociationID)
 				// Remove locally
