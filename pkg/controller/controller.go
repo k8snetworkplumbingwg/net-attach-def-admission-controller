@@ -31,14 +31,12 @@ import (
 	networkv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	netattachdefClientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
 	"github.com/nokia/net-attach-def-admission-controller/pkg/localmetrics"
-	"gopkg.in/intel/multus-cni.v3/pkg/logging"
-	"gopkg.in/intel/multus-cni.v3/pkg/types"
+	"gopkg.in/k8snetworkplumbingwg/multus-cni.v3/pkg/logging"
+	"gopkg.in/k8snetworkplumbingwg/multus-cni.v3/pkg/types"
 	api_v1 "k8s.io/api/core/v1"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
@@ -72,11 +70,11 @@ type Controller struct {
 	nadClientset *netattachdefClientset.Clientset
 }
 
-func StartWatchingHA() {
+func StartWatchingHA(ignoreNamespaces *string) {
 }
 
 //StartWatching ...  Start prepares watchers and run their controllers, then waits for process termination signals
-func StartWatching() {
+func StartWatching(ignoreNamespaces *string) {
 	var clientset kubernetes.Interface
 
 	/* setup Kubernetes API client */
@@ -96,15 +94,23 @@ func StartWatching() {
 	//Initialize default metrics
 	localmetrics.InitMetrics()
 
+	// add fieldSelector to filter the non-target namespaces
+	fieldSelector := "status.phase==Running"
+	if ignoreNamespaces != nil && len(*ignoreNamespaces) != 0 {
+		for _, ns := range strings.Split(*ignoreNamespaces, ",") {
+			if len(ns) != 0 {
+				fieldSelector = fmt.Sprintf("%s,metadata.namespace!=%s", fieldSelector, ns)
+			}
+		}
+	}
+
 	informer := cache.NewSharedIndexInformer(
-		&cache.ListWatch{
-			ListFunc: func(options meta_v1.ListOptions) (runtime.Object, error) {
-				return clientset.CoreV1().Pods(api_v1.NamespaceAll).List(context.TODO(), options)
+		cache.NewFilteredListWatchFromClient(
+			clientset.CoreV1().RESTClient(),
+			"pods", api_v1.NamespaceAll, func(options *meta_v1.ListOptions) {
+				options.FieldSelector = fieldSelector
 			},
-			WatchFunc: func(options meta_v1.ListOptions) (watch.Interface, error) {
-				return clientset.CoreV1().Pods(api_v1.NamespaceAll).Watch(context.TODO(), options)
-			},
-		},
+		),
 		&api_v1.Pod{},
 		resyncPeriod,
 		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, // use default indexer
@@ -155,14 +161,30 @@ func newResourceController(client kubernetes.Interface, nadClient *netattachdefC
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
-			pod := obj.(meta_v1.Object)
-			if _, ok := pod.GetAnnotations()[nadPodAnnotation]; ok {
+			metaObj, isMetaObj := obj.(meta_v1.Object)
+
+			// When a delete is dropped, the relist will notice an object in the store not
+			// in the list, leading to the insertion of a tombstone object which contains
+			// the deleted key/value. Note that this value might be stale.
+			if !isMetaObj {
+				tombstone, isTombstone := obj.(cache.DeletedFinalStateUnknown)
+				if !isTombstone {
+					utilruntime.HandleError(fmt.Errorf("contained object that is not a meta object and is not a tombstone %#v", obj))
+					return
+				}
+				metaObj, isMetaObj = tombstone.Obj.(meta_v1.Object)
+				if !isMetaObj {
+					utilruntime.HandleError(fmt.Errorf("tombstone contained object that is not a meta object %#v", obj))
+					return
+				}
+			}
+
+			if _, ok := metaObj.GetAnnotations()[nadPodAnnotation]; ok {
 				key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
 				if err == nil {
 					queue.Add(key)
 				}
 			}
-
 		},
 	})
 

@@ -28,7 +28,7 @@ spec:
     spec:
       containers:
       - name: net-attach-def-admission-controller
-        image: nfvpe/net-attach-def-admission-controller:snapshot
+        image: ghcr.io/k8snetworkplumbingwg/net-attach-def-admission-controller:snapshot
         command:
         - ./bin/webhook
         args:

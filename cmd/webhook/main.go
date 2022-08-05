@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// This is admission controller for network-attachment-definition.
 package main
 
 import (
@@ -48,11 +49,12 @@ func main() {
 	metricsAddress := flag.String("metrics-listen-address", ":9091", "metrics server listen address.")
 	cert := flag.String("tls-cert-file", "cert.pem", "File containing the default x509 Certificate for HTTPS.")
 	key := flag.String("tls-private-key-file", "key.pem", "File containing the default x509 private key matching --tls-cert-file.")
+	ignoreNamespaces := flag.String("ignore-namespaces", "", "Comma separated namespace list to ignore pod update")
 	flag.Parse()
 
 	glog.Infof("starting net-attach-def-admission-controller webhook server")
 
-	keyPair, err := webhook.NewTlsKeypairReloader(*cert, *key)
+	keyPair, err := webhook.NewTLSKeypairReloader(*cert, *key)
 	if err != nil {
 		glog.Fatalf("error load certificate: %s", err.Error())
 	}
@@ -76,7 +78,7 @@ func main() {
 	startHTTPMetricServer(*metricsAddress)
 
 	//Start watching for pod creations
-	go controller.StartWatchingHA()
+	go controller.StartWatchingHA(ignoreNamespaces)
 
 	go func() {
 		/* register handlers */
