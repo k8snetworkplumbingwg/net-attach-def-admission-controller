@@ -6,8 +6,8 @@ import (
 	"io/ioutil"
 	"strings"
 
-	"github.com/jaypipes/ghw"
 	"github.com/nokia/net-attach-def-admission-controller/pkg/datatypes"
+	"github.com/safchain/ethtool"
 	"github.com/vishvananda/netlink"
 
 	"k8s.io/klog"
@@ -103,6 +103,11 @@ func getNodeTopology(provider string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	ethHandle, err := ethtool.NewEthtool()
+	if err != nil {
+		return nil, err
+	}
+	defer ethHandle.Close()
 	for _, link := range links {
 		bondName := ""
 		if link.Attrs().Name == "tenant-bond" {
@@ -116,9 +121,24 @@ func getNodeTopology(provider string) ([]byte, error) {
 		}
 	}
 	for _, link := range links {
+		macAddress, err := ethHandle.PermAddr(link.Attrs().Name)
+		if err != nil {
+			return nil, err
+		}
+		if provider == "openstack" {
+			if strings.HasPrefix(link.Attrs().Name, "eth") {
+				pciAddress, err := ethHandle.BusInfo(link.Attrs().Name)
+				if err != nil {
+					return nil, err
+				}
+				pci2nic[pciAddress] = datatypes.Nic{
+					Name:       link.Attrs().Name,
+					MacAddress: macAddress}
+			}
+		}
 		nic := datatypes.Nic{
 			Name:       link.Attrs().Name,
-			MacAddress: link.Attrs().HardwareAddr.String()}
+			MacAddress: macAddress}
 		name2nic[nic.Name] = nic
 		bondName := ""
 		if bondIndex["tenant-bond"] > 0 && link.Attrs().MasterIndex == bondIndex["tenant-bond"] {
@@ -148,22 +168,6 @@ func getNodeTopology(provider string) ([]byte, error) {
 		if err != nil {
 			klog.Errorf("Error when reading sriovdp config file %s", sriovConfigFile)
 		} else {
-			if provider == "openstack" {
-				net, err := ghw.Network()
-				if err != nil {
-					return nil, err
-				}
-				for _, nic := range net.NICs {
-					if nic.IsVirtual {
-						continue
-					}
-					if strings.HasPrefix(nic.Name, "eth") {
-						pci2nic[*nic.PCIAddress] = datatypes.Nic{
-							Name:       nic.Name,
-							MacAddress: nic.MacAddress}
-					}
-				}
-			}
 			for _, resource := range resourceList.Resources {
 				topology.SriovPools[resource.ResourceName] = make(datatypes.NicMap)
 				if provider == "openstack" {

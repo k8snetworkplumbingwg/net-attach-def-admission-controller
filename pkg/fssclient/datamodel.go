@@ -42,6 +42,7 @@ type Deployment struct {
 	Name     string `json:"name"`
 	PluginID string `json:"pluginID"`
 	ID       string `json:"id"`
+	Status   string `json:"status"`
 	/*
 		ExternalID  string `json:"externalId",omitempty`
 		Description string `json:"description",omitempty`
@@ -59,10 +60,10 @@ type Tenant struct {
 	Name              string `json:"name"`
 	FssManaged        bool   `json:"fssManaged"`
 	ID                string `json:"id"`
+	Status            string `json:"status"`
 	/*
 		ExternalID        string `json:"externalId",omitempty`
 		DeployedVersion   int    `json:"deployedVersion",omitempty`
-		FssWorkloadState  string `json:"fssWorkloadState",omitempty`
 		Version           int    `json:"version",omitempty`
 	*/
 }
@@ -75,6 +76,7 @@ type Subnet struct {
 	Name         string `json:"name"`
 	FssManaged   bool   `json:"fssManaged"`
 	ID           string `json:"id"`
+	Status       string `json:"status"`
 	/*
 		ExternalID      string `json:"externalId",omitempty`
 		DeployedVersion int    `json:"deployedVersion",omitempty`
@@ -87,6 +89,7 @@ type HostPortLabel struct {
 	DeploymentID string `json:"deploymentId"`
 	Name         string `json:"name"`
 	ID           string `json:"id"`
+	Status       string `json:"status"`
 	/*
 		ExternalID      string `json:"externalId",omitempty`
 		DeployedVersion int    `json:"deployedVersion",omitempty`
@@ -99,8 +102,10 @@ type SubnetAssociation struct {
 	DeploymentID    string `json:"deploymentId"`
 	HostPortLabelID string `json:"hostPortLabelID"`
 	SubnetID        string `json:"subnetId"`
-	VlanID          int    `json:"vlanId"`
+	VlanType        string `json:"vlanType"`
+	VlanValue       string `json:"vlanValue"`
 	ID              string `json:"id"`
+	Status          string `json:"status"`
 	/*
 		ExternalID      string `json:"externalId",omitempty`
 		DeployedVersion int    `json:"deployedVersion",omitempty`
@@ -110,15 +115,20 @@ type SubnetAssociation struct {
 
 type HostPorts []HostPort
 type HostPort struct {
-	DeploymentID string `json:"deploymentId"`
-	HostName     string `json:"hostName"`
-	PortName     string `json:"portName"`
-	ID           string `json:"id"`
+	DeploymentID     string   `json:"deploymentId"`
+	HostName         string   `json:"hostName"`
+	PortName         string   `json:"portName"`
+	Name             string   `json:"name"`
+	ID               string   `json:"id"`
+	IsLag            bool     `json:"isLag"`
+	ParentHostPortID string   `json:"parentHostPortId"`
+	Status           string   `json:"status"`
+	EdgeMapIds       []string `json:"edgeMapIds"`
 	/*
-		ExternalID      string `json:"externalId",omitempty`
-		DeployedVersion int    `json:"deployedVersion",omitempty`
-		EdgeMapID       string `json:"edgeMapId",omitempty`
-		Version         int    `json:"version",omitempty`
+		MacAddress       string   `json:"macAddress"`
+		ExternalID       string   `json:"externalId",omitempty`
+		DeployedVersion  int      `json:"deployedVersion",omitempty`
+		Version          int      `json:"version",omitempty`
 	*/
 }
 
@@ -128,6 +138,7 @@ type HostPortAssociation struct {
 	HostPortID      string `json:"hostPortId"`
 	HostPortLabelID string `json:"hostPortLabelId"`
 	ID              string `json:"id"`
+	Status          string `json:"status"`
 	/*
 		ExternalID      string `json:"externalId",omitempty`
 		DeployedVersion int    `json:"deployedVersion",omitempty`
