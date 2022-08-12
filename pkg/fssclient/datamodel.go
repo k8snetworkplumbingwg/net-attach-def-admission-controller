@@ -156,7 +156,12 @@ type ErrorResponse struct {
 	Type           string   `json:"type"`
 }
 
-type HostPortLabelIDByVlan map[int]string
+type Vlan struct {
+	vlanType  string
+	vlanValue string
+}
+
+type HostPortLabelIDByVlan map[Vlan]string
 type HostPortIDByName map[string]string
 type HostPortAssociationIDByPort map[string]string
 
@@ -165,9 +170,9 @@ type Database struct {
 	tenants map[string]Tenant
 	// Subnets by fssSubnetId
 	subnets map[string]Subnet
-	// HostPortLabelID by fssSubnetId and VlanID
+	// HostPortLabelID by fssSubnetId and Vlan
 	hostPortLabels map[string]HostPortLabelIDByVlan
-	// HostPortLabelID by fssSubnetId and VlanID
+	// HostPortLabelID by fssSubnetId and Vlan
 	attachedLabels map[string]HostPortLabelIDByVlan
 	// HostPortID by HostName and PortName
 	hostPorts map[string]HostPortIDByName

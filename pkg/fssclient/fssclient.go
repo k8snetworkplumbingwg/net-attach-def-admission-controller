@@ -694,7 +694,8 @@ func (f *FssClient) CreateSubnetInterface(fssWorkloadEvpnId string, fssSubnetId 
 		f.database.attachedLabels[fssSubnetId] = make(HostPortLabelIDByVlan)
 	}
 	hostPortLabels := f.database.hostPortLabels[fssSubnetId]
-	hostPortLabelID, ok3 := hostPortLabels[vlanId]
+	vlan := Vlan{"value", strconv.Itoa(vlanId)}
+	hostPortLabelID, ok3 := hostPortLabels[vlan]
 	if ok1 && ok2 && ok3 {
 		return hostPortLabelID, nil
 	}
@@ -717,7 +718,7 @@ func (f *FssClient) CreateSubnetInterface(fssWorkloadEvpnId string, fssSubnetId 
 	}
 	json.Unmarshal(jsonResponse, &hostPortLabel)
 	klog.Infof("HostPortLabel is created: %+v", hostPortLabel)
-	f.database.hostPortLabels[fssSubnetId][vlanId] = hostPortLabel.ID
+	f.database.hostPortLabels[fssSubnetId][vlan] = hostPortLabel.ID
 	return hostPortLabel.ID, nil
 }
 
@@ -731,7 +732,8 @@ func (f *FssClient) GetSubnetInterface(fssWorkloadEvpnId string, fssSubnetId str
 		return "", false
 	}
 	hostPortLabels := f.database.hostPortLabels[fssSubnetId]
-	hostPortLabelID, ok := hostPortLabels[vlanId]
+	vlan := Vlan{"value", strconv.Itoa(vlanId)}
+	hostPortLabelID, ok := hostPortLabels[vlan]
 	if !ok {
 		return "", false
 	}
@@ -741,8 +743,9 @@ func (f *FssClient) GetSubnetInterface(fssWorkloadEvpnId string, fssSubnetId str
 func (f *FssClient) AttachSubnetInterface(fssSubnetId string, vlanId int, hostPortLabelID string) error {
 	klog.Infof("Attach hostPortLabel %s to fssSubnetId %s for vlanId %d", hostPortLabelID, fssSubnetId, vlanId)
 	attachedLabels := f.database.attachedLabels[fssSubnetId]
-	_, ok := attachedLabels[vlanId]
-	if ok && hostPortLabelID == attachedLabels[vlanId] {
+	vlan := Vlan{"value", strconv.Itoa(vlanId)}
+	_, ok := attachedLabels[vlan]
+	if ok && hostPortLabelID == attachedLabels[vlan] {
 		klog.Infof("hostPortLabel %s already attached", hostPortLabelID)
 		return nil
 	}
@@ -750,7 +753,8 @@ func (f *FssClient) AttachSubnetInterface(fssSubnetId string, vlanId int, hostPo
 		DeploymentID:    f.deployment.ID,
 		HostPortLabelID: hostPortLabelID,
 		SubnetID:        f.database.subnets[fssSubnetId].ID,
-		VlanID:          vlanId,
+		VlanType:        "value",
+		VlanValue:       strconv.Itoa(vlanId),
 	}
 	jsonRequest, _ := json.Marshal(subnetAssociation)
 	statusCode, jsonResponse, err := f.POST(subnetAssociationPath, jsonRequest)
@@ -765,15 +769,16 @@ func (f *FssClient) AttachSubnetInterface(fssSubnetId string, vlanId int, hostPo
 	}
 	json.Unmarshal(jsonResponse, &subnetAssociation)
 	klog.Infof("SubnetAssociation is created: %+v", subnetAssociation)
-	f.database.attachedLabels[fssSubnetId][vlanId] = subnetAssociation.HostPortLabelID
+	f.database.attachedLabels[fssSubnetId][vlan] = subnetAssociation.HostPortLabelID
 	return nil
 }
 
 func (f *FssClient) DeleteSubnetInterface(fssSubnetId string, vlanId int, hostPortLabelID string) error {
 	klog.Infof("Delete hostPortLabel %s for fssSubnetId %s and vlanId %d", hostPortLabelID, fssSubnetId, vlanId)
 	var result error
-	_, ok := f.database.attachedLabels[fssSubnetId][vlanId]
-	if ok && hostPortLabelID == f.database.attachedLabels[fssSubnetId][vlanId] {
+	vlan := Vlan{"value", strconv.Itoa(vlanId)}
+	_, ok := f.database.attachedLabels[fssSubnetId][vlan]
+	if ok && hostPortLabelID == f.database.attachedLabels[fssSubnetId][vlan] {
 		// HostPortLabel: When deleting a HostPortLabel, the associations to Subnet and HostPort are automatically deleted.
 		u := hostPortLabelPath + "/" + hostPortLabelID
 		statusCode, _, err := f.DELETE(u)
@@ -788,8 +793,8 @@ func (f *FssClient) DeleteSubnetInterface(fssSubnetId string, vlanId int, hostPo
 		klog.Infof("HostPortLabel %s does not exists", hostPortLabelID)
 	}
 	// Local deletion: hostPortLabels, attacheLabels, attachedHostPorts
-	delete(f.database.hostPortLabels[fssSubnetId], vlanId)
-	delete(f.database.attachedLabels[fssSubnetId], vlanId)
+	delete(f.database.hostPortLabels[fssSubnetId], vlan)
+	delete(f.database.attachedLabels[fssSubnetId], vlan)
 	delete(f.database.attachedPorts, hostPortLabelID)
 	return result
 }
