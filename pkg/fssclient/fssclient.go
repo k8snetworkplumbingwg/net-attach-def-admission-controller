@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nokia/net-attach-def-admission-controller/pkg/datatypes"
 	"k8s.io/klog"
 
 	corev1 "k8s.io/api/core/v1"
@@ -799,20 +800,22 @@ func (f *FssClient) DeleteSubnetInterface(fssSubnetId string, vlanId int, hostPo
 	return result
 }
 
-func (f *FssClient) AttachHostPort(hostPortLabelID string, node string, port string) error {
+func (f *FssClient) AttachHostPort(hostPortLabelID string, node string, port datatypes.JsonNic) error {
 	hostPorts, ok := f.database.hostPorts[node]
 	if !ok {
 		f.database.hostPorts[node] = make(HostPortIDByName)
 		hostPorts = f.database.hostPorts[node]
 	}
 	// Check if port exists
-	hostPortID, ok := hostPorts[port]
+	portName := port["name"].(string)
+	hostPortID, ok := hostPorts[portName]
 	if !ok {
-		klog.Infof("Create hostPort for host %s port %s", node, port)
+		klog.Infof("Create hostPort for host %s port %s", node, portName)
 		hostPort := HostPort{
 			DeploymentID: f.deployment.ID,
 			HostName:     node,
-			PortName:     port,
+			PortName:     portName,
+			MacAddress:   port["mac-address"].(string),
 		}
 		jsonRequest, _ := json.Marshal(hostPort)
 		statusCode, jsonResponse, err := f.POST(hostPortPath, jsonRequest)
@@ -828,7 +831,7 @@ func (f *FssClient) AttachHostPort(hostPortLabelID string, node string, port str
 		json.Unmarshal(jsonResponse, &hostPort)
 		klog.Infof("HostPort is created: %+v", hostPort)
 		hostPortID = hostPort.ID
-		f.database.hostPorts[node][port] = hostPortID
+		f.database.hostPorts[node][portName] = hostPortID
 
 	}
 	// Check if port is already attached
@@ -838,7 +841,7 @@ func (f *FssClient) AttachHostPort(hostPortLabelID string, node string, port str
 			return nil
 		}
 	}
-	klog.Infof("Add hostPortLabel %s to host %s port %s", hostPortLabelID, node, port)
+	klog.Infof("Add hostPortLabel %s to host %s port %s", hostPortLabelID, node, portName)
 	hostPortAssociation := HostPortAssociation{
 		DeploymentID:    f.deployment.ID,
 		HostPortLabelID: hostPortLabelID,
@@ -863,12 +866,13 @@ func (f *FssClient) AttachHostPort(hostPortLabelID string, node string, port str
 	return nil
 }
 
-func (f *FssClient) DetachHostPort(hostPortLabelID string, node string, port string) error {
+func (f *FssClient) DetachHostPort(hostPortLabelID string, node string, port datatypes.JsonNic) error {
 	var result error
 	// Check if port exists
-	hostPortID, ok := f.database.hostPorts[node][port]
+	portName := port["name"].(string)
+	hostPortID, ok := f.database.hostPorts[node][portName]
 	if ok {
-		klog.Infof("Remove hostPortLabel %s from host %s port %s", hostPortLabelID, node, port)
+		klog.Infof("Remove hostPortLabel %s from host %s port %s", hostPortLabelID, node, portName)
 		for k, v := range f.database.attachedPorts[hostPortLabelID] {
 			if hostPortAssociationID, ok := v[hostPortID]; ok {
 				u := hostPortAssociationPath + "/" + hostPortAssociationID

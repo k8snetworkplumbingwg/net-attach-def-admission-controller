@@ -120,12 +120,12 @@ type HostPort struct {
 	PortName         string   `json:"portName"`
 	Name             string   `json:"name"`
 	ID               string   `json:"id"`
+	MacAddress       string   `json:"macAddress"`
 	IsLag            bool     `json:"isLag"`
 	ParentHostPortID string   `json:"parentHostPortId"`
 	Status           string   `json:"status"`
 	EdgeMapIds       []string `json:"edgeMapIds"`
 	/*
-		MacAddress       string   `json:"macAddress"`
 		ExternalID       string   `json:"externalId",omitempty`
 		DeployedVersion  int      `json:"deployedVersion",omitempty`
 		Version          int      `json:"version",omitempty`

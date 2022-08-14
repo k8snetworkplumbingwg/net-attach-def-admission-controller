@@ -65,9 +65,9 @@ func (p *FssVlanProvider) Attach(fssWorkloadEvpnId, fssSubnetId, vlanRange strin
 			return nodesStatus, err
 		}
 		for k, v := range nodesInfo {
-			for i, _ := range v {
+			for i, port := range v {
 				klog.Infof("Attach step 2a: attach hostPortLabel for vlan %d to host %s port %s", vlanId, k, i)
-				err := p.fssClient.AttachHostPort(hostPortLabelID, k, i)
+				err := p.fssClient.AttachHostPort(hostPortLabelID, k, port)
 				nodesStatus[k] = err
 			}
 		}
@@ -102,9 +102,9 @@ func (p *FssVlanProvider) Detach(fssWorkloadEvpnId, fssSubnetId, vlanRange strin
 			}
 		} else {
 			for k, v := range nodesInfo {
-				for i, _ := range v {
+				for i, port := range v {
 					klog.Infof("Detach step 2a: detach vlan %d from host %s port %s", vlanId, k, i)
-					err := p.fssClient.DetachHostPort(hostPortLabelID, k, i)
+					err := p.fssClient.DetachHostPort(hostPortLabelID, k, port)
 					nodesStatus[k] = err
 				}
 			}
