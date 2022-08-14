@@ -99,13 +99,42 @@ func GetVlanIds(vlanTrunk string) ([]int, error) {
 	return result, nil
 }
 
-func ShouldTriggerTopoAction(nad *netattachdef.NetworkAttachmentDefinition) (NetConf, bool, error) {
+func GetNetConf(nad *netattachdef.NetworkAttachmentDefinition) (NetConf, error) {
 	// Read NAD Config
 	var netConf NetConf
-	err := json.Unmarshal([]byte(nad.Spec.Config), &netConf)
+	var config map[string]interface{}
+	if err := json.Unmarshal([]byte(nad.Spec.Config), &config); err != nil {
+		return netConf, fmt.Errorf("read NAD config failed: %s", err.Error())
+	}
+
+	// Check if CNI config has plugin
+	if p, ok := config["plugins"]; ok {
+		plugins := p.([]interface{})
+		for _, v := range plugins {
+			plugin := v.(map[string]interface{})
+			if plugin["type"] == "ipvlan" || plugin["type"] == "sriov" {
+				confBytes, _ := json.Marshal(v)
+				json.Unmarshal(confBytes, &netConf)
+				break
+			}
+		}
+	} else {
+		json.Unmarshal([]byte(nad.Spec.Config), &netConf)
+	}
+	return netConf, nil
+}
+
+func ShouldTriggerTopoAction(nad *netattachdef.NetworkAttachmentDefinition) (NetConf, bool, error) {
+	// Get NAD Config
+	netConf, err := GetNetConf(nad)
 	if err != nil {
 		return netConf, false, err
 	}
+
+	if netConf.Type != "ipvlan" && netConf.Type != "sriov" {
+		return netConf, false, nil
+	}
+
 	// Check nodeSelector
 	annotationsMap := nad.GetAnnotations()
 	ns, ok := annotationsMap[NodeSelectorKey]
@@ -147,15 +176,29 @@ func ShouldTriggerTopoAction(nad *netattachdef.NetworkAttachmentDefinition) (Net
 		if !ok || len(resourceName) == 0 {
 			return netConf, false, fmt.Errorf("SRIOV NAD requires resource name")
 		}
+		if netConf.Vlan > 1 && netConf.Vlan < 4095 {
+			// Check extProjectID
+			project, ok := annotationsMap[ExtProjectIDKey]
+			if !ok || len(project) == 0 {
+				return netConf, false, nil
+			}
+			// Check extNetworkID
+			network, ok := annotationsMap[ExtNetworkIDKey]
+			if !ok || len(network) == 0 {
+				return netConf, false, nil
+			}
+			return netConf, true, nil
+		}
+		// untagged is not supported
 		if netConf.Vlan == 0 {
-			// Check Overlays
 			if len(netConf.VlanTrunk) == 0 {
-				return netConf, false, fmt.Errorf("Missing vlan_trunk in CNI")
+				return netConf, false, fmt.Errorf("Untagged vlan (0) is not supported, use vlanTrunk field")
 			}
 			vlanIds, err := GetVlanIds(netConf.VlanTrunk)
 			if err != nil {
 				return netConf, false, fmt.Errorf("Invalid vlan_trunk in CNI: %s", err.Error())
 			}
+			// Check Overlays
 			jsonOverlays, ok := annotationsMap[SriovOverlaysKey]
 			if !ok || len(jsonOverlays) == 0 {
 				return netConf, false, fmt.Errorf("Missing %s in annotations", SriovOverlaysKey)
@@ -181,28 +224,13 @@ func ShouldTriggerTopoAction(nad *netattachdef.NetworkAttachmentDefinition) (Net
 			}
 			vlanTrunk := strings.Join(vlanRanges, ",")
 			overlayVlanIds, _ := GetVlanIds(vlanTrunk)
-			sort.Ints(vlanIds)
 			sort.Ints(overlayVlanIds)
+			sort.Ints(vlanIds)
 			if !reflect.DeepEqual(vlanIds, overlayVlanIds) {
 				return netConf, false, fmt.Errorf("Different vlan ranges found in CNI and annotations")
 			}
-		} else {
-			// Check extProjectID
-			project, ok := annotationsMap[ExtProjectIDKey]
-			if !ok || len(project) == 0 {
-				return netConf, false, nil
-			}
-			// Check extNetworkID
-			network, ok := annotationsMap[ExtNetworkIDKey]
-			if !ok || len(network) == 0 {
-				return netConf, false, nil
-			}
-			// Check vlan
-			if netConf.Vlan < 1 || netConf.Vlan > 4095 {
-				return netConf, false, nil
-			}
+			return netConf, true, nil
 		}
-		return netConf, true, nil
 	}
 	return netConf, false, nil
 }

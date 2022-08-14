@@ -171,9 +171,7 @@ func (c *TopologyController) handleNetworkAttach(nad *netattachdef.NetworkAttach
 	namespace := nad.ObjectMeta.Namespace
 	klog.Infof("handleNetworkAttach invoked for %s/%s", namespace, name)
 
-	var netConf datatypes.NetConf
-	json.Unmarshal([]byte(nad.Spec.Config), &netConf)
-
+	netConf, _ := datatypes.GetNetConf(nad)
 	annotationsMap := nad.GetAnnotations()
 	project, _ := annotationsMap[datatypes.ExtProjectIDKey]
 	network, _ := annotationsMap[datatypes.ExtNetworkIDKey]
@@ -271,8 +269,7 @@ func (c *TopologyController) handleNetworkDetach(nad *netattachdef.NetworkAttach
 	namespace := nad.ObjectMeta.Namespace
 	klog.Infof("handleNetworkDetach invoked for %s/%s", namespace, name)
 
-	var netConf datatypes.NetConf
-	json.Unmarshal([]byte(nad.Spec.Config), &netConf)
+	netConf, _ := datatypes.GetNetConf(nad)
 	annotationsMap := nad.GetAnnotations()
 	project, _ := annotationsMap[datatypes.ExtProjectIDKey]
 	network, _ := annotationsMap[datatypes.ExtNetworkIDKey]
