@@ -399,7 +399,7 @@ func NewFssClient(k8sClientSet kubernetes.Interface, podNamespace string, cfg *A
 	}
 	// Wait Admin set adminUp to true
 	if !f.deployment.AdminUp {
-		klog.Infof("Wait adminUp becomes true for plugin %s deployment %s...", f.plugin.ID, f.deployment.ID)
+		klog.Infof("Wait adminUp becomes true for plugin %s deployment %s ...", f.plugin.ID, f.deployment.ID)
 		path := deploymentPath + "/" + f.deployment.ID
 		for !f.deployment.AdminUp {
 			time.Sleep(10 * time.Second)
@@ -695,7 +695,13 @@ func (f *FssClient) CreateSubnetInterface(fssWorkloadEvpnId string, fssSubnetId 
 		f.database.attachedLabels[fssSubnetId] = make(HostPortLabelIDByVlan)
 	}
 	hostPortLabels := f.database.hostPortLabels[fssSubnetId]
-	vlan := Vlan{"value", strconv.Itoa(vlanId)}
+	vlanType := "value"
+	vlanValue := strconv.Itoa(vlanId)
+	if vlanId == 0 {
+		vlanType = "untagged"
+		vlanValue = ""
+	}
+	vlan := Vlan{vlanType, vlanValue}
 	hostPortLabelID, ok3 := hostPortLabels[vlan]
 	if ok1 && ok2 && ok3 {
 		return hostPortLabelID, nil
@@ -733,7 +739,13 @@ func (f *FssClient) GetSubnetInterface(fssWorkloadEvpnId string, fssSubnetId str
 		return "", false
 	}
 	hostPortLabels := f.database.hostPortLabels[fssSubnetId]
-	vlan := Vlan{"value", strconv.Itoa(vlanId)}
+	vlanType := "value"
+	vlanValue := strconv.Itoa(vlanId)
+	if vlanId == 0 {
+		vlanType = "untagged"
+		vlanValue = ""
+	}
+	vlan := Vlan{vlanType, vlanValue}
 	hostPortLabelID, ok := hostPortLabels[vlan]
 	if !ok {
 		return "", false
@@ -744,7 +756,13 @@ func (f *FssClient) GetSubnetInterface(fssWorkloadEvpnId string, fssSubnetId str
 func (f *FssClient) AttachSubnetInterface(fssSubnetId string, vlanId int, hostPortLabelID string) error {
 	klog.Infof("Attach hostPortLabel %s to fssSubnetId %s for vlanId %d", hostPortLabelID, fssSubnetId, vlanId)
 	attachedLabels := f.database.attachedLabels[fssSubnetId]
-	vlan := Vlan{"value", strconv.Itoa(vlanId)}
+	vlanType := "value"
+	vlanValue := strconv.Itoa(vlanId)
+	if vlanId == 0 {
+		vlanType = "untagged"
+		vlanValue = ""
+	}
+	vlan := Vlan{vlanType, vlanValue}
 	_, ok := attachedLabels[vlan]
 	if ok && hostPortLabelID == attachedLabels[vlan] {
 		klog.Infof("hostPortLabel %s already attached", hostPortLabelID)
@@ -754,8 +772,8 @@ func (f *FssClient) AttachSubnetInterface(fssSubnetId string, vlanId int, hostPo
 		DeploymentID:    f.deployment.ID,
 		HostPortLabelID: hostPortLabelID,
 		SubnetID:        f.database.subnets[fssSubnetId].ID,
-		VlanType:        "value",
-		VlanValue:       strconv.Itoa(vlanId),
+		VlanType:        vlanType,
+		VlanValue:       vlanValue,
 	}
 	jsonRequest, _ := json.Marshal(subnetAssociation)
 	statusCode, jsonResponse, err := f.POST(subnetAssociationPath, jsonRequest)
@@ -777,7 +795,13 @@ func (f *FssClient) AttachSubnetInterface(fssSubnetId string, vlanId int, hostPo
 func (f *FssClient) DeleteSubnetInterface(fssSubnetId string, vlanId int, hostPortLabelID string) error {
 	klog.Infof("Delete hostPortLabel %s for fssSubnetId %s and vlanId %d", hostPortLabelID, fssSubnetId, vlanId)
 	var result error
-	vlan := Vlan{"value", strconv.Itoa(vlanId)}
+	vlanType := "value"
+	vlanValue := strconv.Itoa(vlanId)
+	if vlanId == 0 {
+		vlanType = "untagged"
+		vlanValue = ""
+	}
+	vlan := Vlan{vlanType, vlanValue}
 	_, ok := f.database.attachedLabels[fssSubnetId][vlan]
 	if ok && hostPortLabelID == f.database.attachedLabels[fssSubnetId][vlan] {
 		// HostPortLabel: When deleting a HostPortLabel, the associations to Subnet and HostPort are automatically deleted.
@@ -815,6 +839,7 @@ func (f *FssClient) AttachHostPort(hostPortLabelID string, node string, port dat
 			DeploymentID: f.deployment.ID,
 			HostName:     node,
 			PortName:     portName,
+			IsLag:        false,
 			MacAddress:   port["mac-address"].(string),
 		}
 		jsonRequest, _ := json.Marshal(hostPort)

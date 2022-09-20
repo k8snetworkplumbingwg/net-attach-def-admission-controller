@@ -1,7 +1,6 @@
 package vlanprovider
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -55,7 +54,7 @@ func (p *FssVlanProvider) UpdateNodeTopology(name string, topology string) (stri
 func (p *FssVlanProvider) Attach(fssWorkloadEvpnId, fssSubnetId, vlanRange string, nodesInfo map[string]datatypes.NicMap, requestType datatypes.NadAction) (map[string]error, error) {
 	nodesStatus := make(map[string]error)
 	for k, _ := range nodesInfo {
-		nodesStatus[k] = errors.New("undefined")
+		nodesStatus[k] = nil
 	}
 	vlanIds, _ := datatypes.GetVlanIds(vlanRange)
 	for _, vlanId := range vlanIds {
@@ -85,7 +84,7 @@ func (p *FssVlanProvider) Attach(fssWorkloadEvpnId, fssSubnetId, vlanRange strin
 func (p *FssVlanProvider) Detach(fssWorkloadEvpnId, fssSubnetId, vlanRange string, nodesInfo map[string]datatypes.NicMap, requestType datatypes.NadAction) (map[string]error, error) {
 	nodesStatus := make(map[string]error)
 	for k, _ := range nodesInfo {
-		nodesStatus[k] = errors.New("undefined")
+		nodesStatus[k] = nil
 	}
 	vlanIds, _ := datatypes.GetVlanIds(vlanRange)
 	for _, vlanId := range vlanIds {

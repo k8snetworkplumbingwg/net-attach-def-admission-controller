@@ -85,7 +85,7 @@ func validateCNIConfig(config []byte) error {
 	return nil
 }
 
-//getInfraVlanData returns vlan ranges used by cloud infra-structure
+// getInfraVlanData returns vlan ranges used by cloud infra-structure
 func getInfraVlanData() ([]int, error) {
 	var infraVlans []int
 
@@ -122,9 +122,10 @@ func validateCNIConfigSriov(config []byte) error {
 
 	if cniType, ok := c["type"]; ok {
 		if cniType == "sriov" {
+			checkInfraVlan := false
 			infraVlans, err := getInfraVlanData()
-			if err != nil || len(infraVlans) == 0 {
-				return nil
+			if err == nil && len(infraVlans) > 0 {
+				checkInfraVlan = true
 			}
 			vlan, vlanExists := c["vlan"]
 			vlanTrunk, vlanTrunkExists := c["vlan_trunk"]
@@ -140,9 +141,11 @@ func validateCNIConfigSriov(config []byte) error {
 				if err1 != nil {
 					return fmt.Errorf("vlan field format error")
 				}
-				for i := 0; i < len(infraVlans); i++ {
-					if infraVlans[i] == vlanId {
-						return fmt.Errorf("infrastructure vlan id %d shall not be used in vlan field", infraVlans[i])
+				if checkInfraVlan {
+					for i := 0; i < len(infraVlans); i++ {
+						if infraVlans[i] == vlanId {
+							return fmt.Errorf("infrastructure vlan id %d shall not be used in vlan field", infraVlans[i])
+						}
 					}
 				}
 			}
@@ -162,22 +165,26 @@ func validateCNIConfigSriov(config []byte) error {
 						return fmt.Errorf("vlan_trunk field range error")
 					}
 
-					for i := 0; i < len(infraVlans); i++ {
-						if infraVlans[i] >= v1 && infraVlans[i] <= v2 {
-							return fmt.Errorf("infrastructure vlan id %d shall not be used in vlan_trunk field", infraVlans[i])
+					if checkInfraVlan {
+						for i := 0; i < len(infraVlans); i++ {
+							if infraVlans[i] >= v1 && infraVlans[i] <= v2 {
+								return fmt.Errorf("infrastructure vlan id %d shall not be used in vlan_trunk field", infraVlans[i])
+							}
 						}
 					}
 				}
 			}
-			qos, qosExists := c["vlanQoS"]
-			if qosExists {
-				qosString := fmt.Sprintf("%v", qos)
-				qosId, err1 := strconv.Atoi(qosString)
-				if err1 != nil {
-					return fmt.Errorf("qos field format error")
-				}
-				if qosId != 0 {
-					return fmt.Errorf("qos %v is defined while only default qos (0) is allowed", qosId)
+			if checkInfraVlan {
+				qos, qosExists := c["vlanQoS"]
+				if qosExists {
+					qosString := fmt.Sprintf("%v", qos)
+					qosId, err1 := strconv.Atoi(qosString)
+					if err1 != nil {
+						return fmt.Errorf("qos field format error")
+					}
+					if qosId != 0 {
+						return fmt.Errorf("qos %v is defined while only default qos (0) is allowed", qosId)
+					}
 				}
 			}
 		}
@@ -218,7 +225,7 @@ func validateNetworkAttachmentDefinition(operation v1beta1.Operation, netAttachD
 		return false, false, err
 	}
 
-	glog.Infof("validating network config spec: %s", netAttachDef.Spec.Config)
+	glog.V(5).Infof("validating NAD: %s", netAttachDef)
 
 	var confBytes []byte
 	var mutationRequired bool = false
@@ -416,7 +423,7 @@ func validateForFabricOperator(operation v1beta1.Operation, oldNad, netAttachDef
 	}
 
 	if operation == "UPDATE" {
-		_, err := datatypes.ShouldTriggerTopoUpdate(&netAttachDef, &oldNad)
+		_, err := datatypes.ShouldTriggerTopoUpdate(&oldNad, &netAttachDef)
 		if err != nil {
 			return err
 		}

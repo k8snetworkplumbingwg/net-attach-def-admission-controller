@@ -32,6 +32,7 @@ type Plugin struct {
 			Name        string `json:"name"`
 			Required    bool   `json:"required"`
 			Unique      bool   `json:"unique"`
+			Encrypted   bool   `json:"encrypted"`
 		} `json:"possibleSettings",omitempty`
 	*/
 }

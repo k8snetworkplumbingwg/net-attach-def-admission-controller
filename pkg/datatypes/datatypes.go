@@ -153,22 +153,6 @@ func ShouldTriggerTopoAction(nad *netattachdef.NetworkAttachmentDefinition) (Net
 		if !ok || len(network) == 0 {
 			return netConf, false, nil
 		}
-		// Check vlan
-		if netConf.Vlan < 1 || netConf.Vlan > 4095 {
-			return netConf, false, nil
-		}
-		// Check master is tenant-bond.vlan or provider-bond.vlan
-		if !strings.HasPrefix(netConf.Master, "tenant-bond.") && !strings.HasPrefix(netConf.Master, "provider-bond.") {
-			return netConf, false, nil
-		}
-		m := strings.Split(netConf.Master, ".")
-		v, err := strconv.Atoi(m[1])
-		if err != nil {
-			return netConf, false, nil
-		}
-		if v != netConf.Vlan {
-			return netConf, false, nil
-		}
 		return netConf, true, nil
 	}
 	if netConf.Type == "sriov" {
@@ -176,24 +160,7 @@ func ShouldTriggerTopoAction(nad *netattachdef.NetworkAttachmentDefinition) (Net
 		if !ok || len(resourceName) == 0 {
 			return netConf, false, fmt.Errorf("SRIOV NAD requires resource name")
 		}
-		if netConf.Vlan > 1 && netConf.Vlan < 4095 {
-			// Check extProjectID
-			project, ok := annotationsMap[ExtProjectIDKey]
-			if !ok || len(project) == 0 {
-				return netConf, false, nil
-			}
-			// Check extNetworkID
-			network, ok := annotationsMap[ExtNetworkIDKey]
-			if !ok || len(network) == 0 {
-				return netConf, false, nil
-			}
-			return netConf, true, nil
-		}
-		// untagged is not supported
-		if netConf.Vlan == 0 {
-			if len(netConf.VlanTrunk) == 0 {
-				return netConf, false, fmt.Errorf("Untagged vlan (0) is not supported, use vlanTrunk field")
-			}
+		if len(netConf.VlanTrunk) > 0 {
 			vlanIds, err := GetVlanIds(netConf.VlanTrunk)
 			if err != nil {
 				return netConf, false, fmt.Errorf("Invalid vlan_trunk in CNI: %s", err.Error())
@@ -230,6 +197,20 @@ func ShouldTriggerTopoAction(nad *netattachdef.NetworkAttachmentDefinition) (Net
 				return netConf, false, fmt.Errorf("Different vlan ranges found in CNI and annotations")
 			}
 			return netConf, true, nil
+		} else {
+			if netConf.Vlan >= 0 && netConf.Vlan <= 4095 {
+				// Check extProjectID
+				project, ok := annotationsMap[ExtProjectIDKey]
+				if !ok || len(project) == 0 {
+					return netConf, false, nil
+				}
+				// Check extNetworkID
+				network, ok := annotationsMap[ExtNetworkIDKey]
+				if !ok || len(network) == 0 {
+					return netConf, false, nil
+				}
+				return netConf, true, nil
+			}
 		}
 	}
 	return netConf, false, nil
@@ -239,6 +220,7 @@ func ShouldTriggerTopoUpdate(oldNad, newNad *netattachdef.NetworkAttachmentDefin
 	// Check NAD for action
 	oldNetConf, trigger1, _ := ShouldTriggerTopoAction(oldNad)
 	newNetConf, trigger2, _ := ShouldTriggerTopoAction(newNad)
+
 	if !trigger1 && !trigger2 {
 		return 0, nil
 	}
@@ -246,7 +228,7 @@ func ShouldTriggerTopoUpdate(oldNad, newNad *netattachdef.NetworkAttachmentDefin
 		return UpdateAttach, nil
 	}
 	if trigger1 && !trigger2 {
-		return UpdateDetach, nil
+		return 0, fmt.Errorf("NAD change from FSS eligible to not eligble is not allowed")
 	}
 	// Handle network change
 	if oldNetConf.Type != newNetConf.Type {
@@ -255,19 +237,11 @@ func ShouldTriggerTopoUpdate(oldNad, newNad *netattachdef.NetworkAttachmentDefin
 	if oldNetConf.Vlan > 0 && oldNetConf.Vlan != newNetConf.Vlan {
 		return 0, fmt.Errorf("NAD vlan change is not allowed")
 	}
-	if oldNetConf.Type == "ipvlan" && oldNetConf.Master != newNetConf.Master {
-		return 0, fmt.Errorf("IPVLAN NAD master device change is not allowed")
-	}
 	if oldNetConf.Vlan == 0 && oldNetConf.VlanTrunk != newNetConf.VlanTrunk {
 		return 0, fmt.Errorf("SRIOV NAD vlan_trunk change is not allowed")
 	}
 	anno1 := oldNad.GetAnnotations()
 	anno2 := newNad.GetAnnotations()
-	ns1, _ := anno1[NodeSelectorKey]
-	ns2, _ := anno2[NodeSelectorKey]
-	if ns1 == ns2 {
-		return 0, nil
-	}
 	if newNetConf.Type == "sriov" && newNetConf.Vlan == 0 {
 		sriovOverlays1, _ := anno1[SriovOverlaysKey]
 		sriovOverlays2, _ := anno2[SriovOverlaysKey]
@@ -285,6 +259,11 @@ func ShouldTriggerTopoUpdate(oldNad, newNad *netattachdef.NetworkAttachmentDefin
 		if net1 != net2 {
 			return 0, fmt.Errorf("NAD network change is not allowed")
 		}
+	}
+	ns1, _ := anno1[NodeSelectorKey]
+	ns2, _ := anno2[NodeSelectorKey]
+	if ns1 == ns2 {
+		return 0, nil
 	}
 	return UpdateAttachDetach, nil
 }
