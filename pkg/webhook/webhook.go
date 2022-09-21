@@ -132,8 +132,10 @@ func validateCNIConfigSriov(config []byte) error {
 			if vlanExists && vlanTrunkExists {
 				return fmt.Errorf("both vlan and vlan_trunk fields are defined")
 			}
-			if !vlanExists && !vlanTrunkExists {
-				return fmt.Errorf("either vlan or vlan_trunk field should be defined")
+			if checkInfraVlan {
+				if !vlanExists && !vlanTrunkExists {
+					return fmt.Errorf("either vlan or vlan_trunk field should be defined")
+				}
 			}
 			if vlanExists {
 				vlanString := fmt.Sprintf("%v", vlan)
