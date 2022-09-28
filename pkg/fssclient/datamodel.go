@@ -2,6 +2,7 @@ package fssclient
 
 import (
 	"encoding/json"
+	"strings"
 )
 
 type LoginResponse struct {
@@ -184,16 +185,18 @@ type Database struct {
 type EncodedDatabase struct {
 	Tenants        map[string]map[string]interface{}
 	Subnets        map[string]map[string]interface{}
-	HostPortLabels map[string]HostPortLabelIDByVlan
-	AttachedLabels map[string]HostPortLabelIDByVlan
+	HostPortLabels map[string]map[string]string
+	AttachedLabels map[string]map[string]string
 	HostPorts      map[string]HostPortIDByName
 	AttachedPorts  map[string][]HostPortAssociationIDByPort
 }
 
-func (d *Database) encode() []byte {
+func (d *Database) encode() ([]byte, error) {
 	var encoded EncodedDatabase
 	encoded.Tenants = make(map[string]map[string]interface{})
 	encoded.Subnets = make(map[string]map[string]interface{})
+	encoded.HostPortLabels = make(map[string]map[string]string)
+	encoded.AttachedLabels = make(map[string]map[string]string)
 	// tenants
 	for k, v := range d.tenants {
 		encoded.Tenants[k] = make(map[string]interface{})
@@ -210,23 +213,42 @@ func (d *Database) encode() []byte {
 		json.Unmarshal(tmp1, &tmp2)
 		encoded.Subnets[k] = tmp2
 	}
-	encoded.HostPortLabels = d.hostPortLabels
-	encoded.AttachedLabels = d.attachedLabels
+	// hostPortLabels
+	for k, v := range d.hostPortLabels {
+		var tmpPortLabels map[string]string
+		tmpPortLabels = make(map[string]string)
+		for mk, mv := range v {
+			tmpPortLabels[mk.vlanType+"-"+mk.vlanValue] = mv
+		}
+		encoded.HostPortLabels[k] = tmpPortLabels
+	}
+	// attachedabels
+	for k, v := range d.attachedLabels {
+		var tmpPortLabels map[string]string
+		tmpPortLabels = make(map[string]string)
+		for mk, mv := range v {
+			tmpPortLabels[mk.vlanType+"-"+mk.vlanValue] = mv
+		}
+		encoded.AttachedLabels[k] = tmpPortLabels
+	}
 	encoded.HostPorts = d.hostPorts
 	encoded.AttachedPorts = d.attachedPorts
-	jsonString, _ := json.Marshal(encoded)
-	return jsonString
+	jsonString, err := json.Marshal(encoded)
+	return jsonString, err
 }
 
 func (d *Database) decode(jsonString []byte) (Database, error) {
 	var decoded Database
 	decoded.tenants = make(map[string]Tenant)
 	decoded.subnets = make(map[string]Subnet)
+	decoded.hostPortLabels = make(map[string]HostPortLabelIDByVlan)
+	decoded.attachedLabels = make(map[string]HostPortLabelIDByVlan)
 	var encoded EncodedDatabase
 	err := json.Unmarshal(jsonString, &encoded)
 	if err != nil {
 		return decoded, err
 	}
+	// tenants
 	for k, v := range encoded.Tenants {
 		tmp, err := json.Marshal(v)
 		if err != nil {
@@ -239,6 +261,7 @@ func (d *Database) decode(jsonString []byte) (Database, error) {
 		}
 		decoded.tenants[k] = tenant
 	}
+	// subports
 	for k, v := range encoded.Subnets {
 		tmp, err := json.Marshal(v)
 		if err != nil {
@@ -251,8 +274,26 @@ func (d *Database) decode(jsonString []byte) (Database, error) {
 		}
 		decoded.subnets[k] = subnet
 	}
-	decoded.hostPortLabels = encoded.HostPortLabels
-	decoded.attachedLabels = encoded.AttachedLabels
+	// hostPortLabels
+	for k, v := range encoded.HostPortLabels {
+		var tmpPortLabels HostPortLabelIDByVlan
+		tmpPortLabels = make(HostPortLabelIDByVlan)
+		for mk, mv := range v {
+			vlan := Vlan{strings.Split(mk, "-")[0], strings.Split(mk, "-")[1]}
+			tmpPortLabels[vlan] = mv
+		}
+		decoded.hostPortLabels[k] = tmpPortLabels
+	}
+	// attachedLabels
+	for k, v := range encoded.AttachedLabels {
+		var tmpPortLabels HostPortLabelIDByVlan
+		tmpPortLabels = make(HostPortLabelIDByVlan)
+		for mk, mv := range v {
+			vlan := Vlan{strings.Split(mk, "-")[0], strings.Split(mk, "-")[1]}
+			tmpPortLabels[vlan] = mv
+		}
+		decoded.attachedLabels[k] = tmpPortLabels
+	}
 	decoded.hostPorts = encoded.HostPorts
 	decoded.attachedPorts = encoded.AttachedPorts
 	return decoded, nil

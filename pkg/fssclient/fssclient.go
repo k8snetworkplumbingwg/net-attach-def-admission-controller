@@ -187,8 +187,12 @@ func (f *FssClient) setConfigMap(name string, data []byte) error {
 }
 
 func (f *FssClient) TxnDone() {
-	jsonString := f.database.encode()
-	f.setConfigMap("database", jsonString)
+	jsonString, err := f.database.encode()
+	if err != nil {
+		klog.Errorf("Database encoding error: %s", err.Error())
+	} else {
+		f.setConfigMap("database", jsonString)
+	}
 }
 
 func (f *FssClient) login(loginURL string) error {
@@ -439,7 +443,9 @@ func NewFssClient(k8sClientSet kubernetes.Interface, podNamespace string, cfg *A
 		jsonString := f.getConfigMap("database")
 		if len(jsonString) > 0 {
 			database, err = database.decode(jsonString)
-			if err == nil {
+			if err != nil {
+				klog.Errorf("Database decoding error: %s", err.Error())
+			} else {
 				f.database = database
 			}
 		}
@@ -546,9 +552,11 @@ func (f *FssClient) Resync(firstRun bool, deploymentID string) error {
 
 	// Check hostPortLabels
 	statusCode, jsonResponse, err := f.GET(hostPortLabelPath)
-	if err != nil || statusCode != 200 {
-		klog.Errorf("Get hostPortLabels failed with status=%d: %s", statusCode, err.Error())
+	if err != nil {
 		return err
+	}
+	if statusCode != 200 {
+		return fmt.Errorf("Get hostPortLabels failed with status=%d", statusCode)
 	}
 	var hostPortLabels HostPortLabels
 	json.Unmarshal(jsonResponse, &hostPortLabels)
@@ -571,16 +579,21 @@ func (f *FssClient) Resync(firstRun bool, deploymentID string) error {
 			u := hostPortLabelPath + "/" + v.ID
 			klog.Warningf("Delete unknown hostPortLabel in server: %s", u)
 			statusCode, _, err := f.DELETE(u)
-			if err != nil || statusCode != 204 {
-				klog.Errorf("Delete hostPortLabel failed with status=%d: %s", statusCode, err.Error())
+			if err != nil {
+				klog.Errorf("Delete hostPortLabel failed: %s", err.Error())
+			}
+			if statusCode != 204 {
+				klog.Errorf("Delete hostPortLabel failed with status=%d", statusCode)
 			}
 		}
 	}
 	// Check hostPorts
 	statusCode, jsonResponse, err = f.GET(hostPortPath)
-	if err != nil || statusCode != 200 {
-		klog.Errorf("Get hostPorts failed with status=%d: %s", statusCode, err.Error())
+	if err != nil {
 		return err
+	}
+	if statusCode != 200 {
+		return fmt.Errorf("Get hostPorts failed with status=%d", statusCode)
 	}
 	var hostPorts HostPorts
 	json.Unmarshal(jsonResponse, &hostPorts)
@@ -601,17 +614,22 @@ func (f *FssClient) Resync(firstRun bool, deploymentID string) error {
 				u := hostPortPath + "/" + v.ID
 				klog.Warningf("Delete unknown hostPort in server: %s", u)
 				statusCode, _, err := f.DELETE(u)
-				if err != nil || statusCode != 204 {
-					klog.Errorf("Delete hostPort failed with status=%d: %s", statusCode, err.Error())
+				if err != nil {
+					klog.Errorf("Delete hostPort failed: %s", err.Error())
+				}
+				if statusCode != 204 {
+					klog.Errorf("Delete hostPort failed with status=%d", statusCode)
 				}
 			}
 		}
 	}
 	// Check tenants
 	statusCode, jsonResponse, err = f.GET(tenantPath)
-	if err != nil || statusCode != 200 {
-		klog.Errorf("Get tenants failed with status=%d: %s", statusCode, err.Error())
+	if err != nil {
 		return err
+	}
+	if statusCode != 200 {
+		return fmt.Errorf("Get tenants failed with status=%d", statusCode)
 	}
 	var tenants Tenants
 	json.Unmarshal(jsonResponse, &tenants)
@@ -630,8 +648,11 @@ func (f *FssClient) Resync(firstRun bool, deploymentID string) error {
 				u := tenantPath + "/" + v.ID
 				klog.Warningf("Delete unknown tenant in server: %s", u)
 				statusCode, _, err := f.DELETE(u)
-				if err != nil || statusCode != 204 {
-					klog.Errorf("Delete tenant failed with status=%d: %s", statusCode, err.Error())
+				if err != nil {
+					klog.Errorf("Delete tenant failed: %s", err.Error())
+				}
+				if statusCode != 204 {
+					klog.Errorf("Delete tenant failed with status=%d", statusCode)
 				}
 			}
 		}
