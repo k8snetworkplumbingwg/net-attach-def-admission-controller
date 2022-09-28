@@ -2,7 +2,6 @@ package netcontroller
 
 import (
 	"context"
-	"encoding/json"
 	"reflect"
 	"strconv"
 	"strings"
@@ -112,11 +111,9 @@ func NewNetworkController(
 }
 
 func (c *NetworkController) shouldTriggerAction(nad *netattachdef.NetworkAttachmentDefinition) (datatypes.NetConf, bool) {
-	// Read NAD Config
-	var netConf datatypes.NetConf
-	err := json.Unmarshal([]byte(nad.Spec.Config), &netConf)
+	// Get NAD Config
+	netConf, err := datatypes.GetNetConf(nad)
 	if err != nil {
-		klog.Error("read NAD config failed: %s", err.Error())
 		return netConf, false
 	}
 	// Check NAD type
