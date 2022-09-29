@@ -332,27 +332,23 @@ func isVlanOperatorRequired(netAttachDef netv1.NetworkAttachmentDefinition) (dat
 
 func shouldTriggerMutation(netConf datatypes.NetConf) (bool, error) {
 	if netConf.Vlan < 1 || netConf.Vlan > 4095 {
-		return false, fmt.Errorf("Nokia Proprietary IPVLAN vlan value out of bound. Valid range 1..4095")
+		return false, fmt.Errorf("Nokia Proprietary IPVLAN vlan field has invalid value. Valid range 1..4095")
 	}
-	if !strings.HasPrefix(netConf.Master, "tenant-bond") && !strings.HasPrefix(netConf.Master, "provider-bond") {
-		return false, fmt.Errorf("Nokia Proprietary IPVLAN only support master with tenant-bond and provider-bond")
+	if !strings.HasPrefix(netConf.Master, "tenant") && !strings.HasPrefix(netConf.Master, "provider") {
+		return false, fmt.Errorf("Nokia Proprietary IPVLAN master field has invalid value. Valid value starts with tenant or provider")
 	}
-
+	if netConf.Master == "tenant-bond" || netConf.Master == "provider-bond" {
+		return true, nil
+	}
 	//check if mutation has already been done
-	if strings.HasPrefix(netConf.Master, "tenant-bond.") || strings.HasPrefix(netConf.Master, "provider-bond.") {
+	if strings.HasPrefix(netConf.Master, "tenant.") || strings.HasPrefix(netConf.Master, "provider.") {
 		m := strings.Split(netConf.Master, ".")
 		v, err := strconv.Atoi(m[1])
-		if err != nil {
+		if err != nil || v != netConf.Vlan {
 			return false, fmt.Errorf("IPVLAN master field %s is incorrect", netConf.Master)
 		}
-		if v != netConf.Vlan {
-			return false, fmt.Errorf("IPVLAN master field %s is incorrect", netConf.Master)
-		}
-		//mutation is already done, no need to mutate
-		return false, nil
 	}
-
-	return true, nil
+	return false, nil
 }
 
 // validateForVlanOperator verifies following fields
@@ -445,15 +441,17 @@ func mutateNetworkAttachmentDefinition(netAttachDef netv1.NetworkAttachmentDefin
 			plugin := v.(map[string]interface{})
 			if plugin["type"] == "ipvlan" {
 				master := plugin["master"].(string)
+				m := strings.Split(master, "-")
 				vlan := fmt.Sprintf("%v", plugin["vlan"])
-				plugin["master"] = master + "." + vlan
+				plugin["master"] = m[0] + "." + vlan
 				break
 			}
 		}
 	} else {
 		master := c["master"].(string)
+		m := strings.Split(master, "-")
 		vlan := fmt.Sprintf("%v", c["vlan"])
-		c["master"] = master + "." + vlan
+		c["master"] = m[0] + "." + vlan
 	}
 
 	configBytes, _ := json.Marshal(c)

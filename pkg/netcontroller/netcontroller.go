@@ -123,8 +123,8 @@ func (c *NetworkController) shouldTriggerAction(nad *netattachdef.NetworkAttachm
 	if netConf.Vlan < 1 || netConf.Vlan > 4095 {
 		return netConf, false
 	}
-	// Check master is tenant-bond.vlan or provider-bond.vlan
-	if !strings.HasPrefix(netConf.Master, "tenant-bond.") && !strings.HasPrefix(netConf.Master, "provider-bond.") {
+	// Check master is tenant.vlan or provider.vlan
+	if !strings.HasPrefix(netConf.Master, "tenant.") && !strings.HasPrefix(netConf.Master, "provider.") {
 		return netConf, false
 	}
 	m := strings.Split(netConf.Master, ".")

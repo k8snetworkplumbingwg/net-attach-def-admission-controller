@@ -54,7 +54,7 @@ func createVlanInterface(vlanIfName string, vlanId int) error {
 		return errors.New("requested vlan is already used by other function")
 	}
 	// Check if master exists
-	link, err := netlink.LinkByName(m[0])
+	link, err := netlink.LinkByName(m[0] + "-bond")
 	if err != nil {
 		return err
 	}
