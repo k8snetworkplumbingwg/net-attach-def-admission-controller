@@ -334,11 +334,11 @@ func shouldTriggerMutation(netConf datatypes.NetConf) (bool, error) {
 	if netConf.Vlan < 1 || netConf.Vlan > 4095 {
 		return false, fmt.Errorf("Nokia Proprietary IPVLAN vlan field has invalid value. Valid range 1..4095")
 	}
-	if !strings.HasPrefix(netConf.Master, "tenant") && !strings.HasPrefix(netConf.Master, "provider") {
-		return false, fmt.Errorf("Nokia Proprietary IPVLAN master field has invalid value. Valid value starts with tenant or provider")
-	}
 	if netConf.Master == "tenant-bond" || netConf.Master == "provider-bond" {
 		return true, nil
+	}
+	if !strings.HasPrefix(netConf.Master, "tenant.") && !strings.HasPrefix(netConf.Master, "provider.") {
+		return false, fmt.Errorf("Nokia Proprietary IPVLAN master field has invalid value. Valid value after mutation is tenant.vlan or provider.vlan")
 	}
 	//check if mutation has already been done
 	if strings.HasPrefix(netConf.Master, "tenant.") || strings.HasPrefix(netConf.Master, "provider.") {
@@ -370,10 +370,15 @@ func validateForVlanOperator(operation v1beta1.Operation, oldNad, netAttachDef n
 
 	//NAD update for ipvlan with master and vlan field change is not allowed
 	if operation == "UPDATE" {
-		oldConf, _ := isVlanOperatorRequired(oldNad)
-		//ensure it is nokia proprietary ipvlan by checking if vlan id present in existing NAD
-		if oldConf.Vlan > 0 && oldConf.Master != netConf.Master && oldConf.Master != netConf.Master+"."+strconv.Itoa(netConf.Vlan) {
-			return false, fmt.Errorf("Nokia Proprietary IPVLAN master and vlan field change is not allowed")
+		oldConf, mutated := isVlanOperatorRequired(oldNad)
+		if mutated {
+			if netConf.Vlan != oldConf.Vlan {
+				return false, fmt.Errorf("Nokia Proprietary IPVLAN vlan field can not change: %d->%d", oldConf.Vlan, netConf.Vlan)
+			}
+			m1 := strings.Split(oldConf.Master, ".")
+			if !strings.HasPrefix(netConf.Master, m1[0]) {
+				return false, fmt.Errorf("Nokia Proprietary IPVLAN device in master field can not change: %s", oldConf.Master)
+			}
 		}
 	}
 

@@ -192,7 +192,7 @@ func (c *TopologyController) handleNetworkAttach(nad *netattachdef.NetworkAttach
 		switch netConf.Type {
 		case "ipvlan":
 			{
-				bondName := strings.Split(netConf.Master, ".")[0]
+				bondName := strings.Split(netConf.Master, ".")[0] + "-bond"
 				nics, ok := nodeTopology.Bonds[bondName]
 				if ok {
 					nodesInfo[nodeName] = nics
@@ -290,7 +290,7 @@ func (c *TopologyController) handleNetworkDetach(nad *netattachdef.NetworkAttach
 		switch netConf.Type {
 		case "ipvlan":
 			{
-				bondName := strings.Split(netConf.Master, ".")[0]
+				bondName := strings.Split(netConf.Master, ".")[0] + "-bond"
 				nics, ok := nodeTopology.Bonds[bondName]
 				if !ok {
 					klog.Errorf("Skip detaching %s: node topology is not available for bond %s", nodeName, bondName)
