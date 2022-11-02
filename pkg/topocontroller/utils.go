@@ -219,7 +219,7 @@ func (c *TopologyController) handleNetworkAttach(nad *netattachdef.NetworkAttach
 		}
 	}
 	if len(nodesInfo) == 0 {
-		klog.Infof("Skip the ATTACH procedure: no candicate node found for %s/%s", namespace, name)
+		klog.Infof("Skip the ATTACH procedure: no candidate node found for %s/%s", namespace, name)
 		return nil
 	}
 
