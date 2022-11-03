@@ -210,7 +210,9 @@ func ShouldTriggerTopoAction(nad *netattachdef.NetworkAttachmentDefinition) (Net
 					return netConf, false, nil
 				}
 				return netConf, true, nil
-			}
+                        } else {
+                                return netConf, false, fmt.Errorf("vlan value is out of bound, valid range (0..4095) ")
+                        }
 		}
 	}
 	return netConf, false, nil
