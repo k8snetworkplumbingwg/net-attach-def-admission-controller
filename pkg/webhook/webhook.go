@@ -27,6 +27,7 @@ import (
 	"github.com/containernetworking/cni/libcni"
 	"github.com/golang/glog"
 	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	"github.com/nokia/net-attach-def-admission-controller/pkg/datatypes"
 	"github.com/pkg/errors"
 	"gopkg.in/k8snetworkplumbingwg/multus-cni.v3/pkg/types"
 	"k8s.io/api/admission/v1beta1"
@@ -35,9 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-
-	"github.com/nokia/net-attach-def-admission-controller/pkg/datatypes"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 type jsonPatchOperation struct {
@@ -762,10 +761,11 @@ func ValidateHandler(w http.ResponseWriter, req *http.Request) {
 // SetupInClusterClient sets up api configuration
 func SetupInClusterClient() {
 	/* setup Kubernetes API client */
-	config, err := rest.InClusterConfig()
+	config, err := clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
 	if err != nil {
 		glog.Fatal(err)
 	}
+
 	clientset, err = kubernetes.NewForConfig(config)
 	if err != nil {
 		glog.Fatal(err)
