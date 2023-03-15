@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io/ioutil"
+	"strconv"
 	"strings"
 
 	"github.com/nokia/net-attach-def-admission-controller/pkg/datatypes"
+
 	"github.com/safchain/ethtool"
 	"github.com/vishvananda/netlink"
 
@@ -33,28 +35,44 @@ type SriovSelectors struct {
 }
 
 func getVlanInterface(vlanIfName string) bool {
-	_, err := netlink.LinkByName(vlanIfName)
-	if err == nil {
-		return true
+	m := strings.Split(vlanIfName, ".")
+	if len(m) != 2 {
+		return false
 	}
-	return false
+	if m[0] != "tenant" && m[0] != "provider" {
+		return false
+	}
+	_, err := strconv.Atoi(m[1])
+	if err != nil {
+		return false
+	}
+	_, err = netlink.LinkByName(vlanIfName)
+	if err != nil {
+		return false
+	}
+	return true
 }
 
 func createVlanInterface(vlanIfName string, vlanId int) error {
 	// Check if vlan interface already exists
 	if getVlanInterface(vlanIfName) {
-		klog.Info("requested vlan interface already exists")
+		klog.Infof("requested vlan interface %s already exists", vlanIfName)
 		return nil
 	}
 	m := strings.Split(vlanIfName, ".")
 	// Check if vlanId is already used
 	vlanByOther := "vlan" + m[1]
-	_, err := netlink.LinkByName(vlanByOther)
+	link, err := netlink.LinkByName(vlanByOther)
 	if err == nil {
-		return errors.New("requested vlan is already used by other function")
+		parent, err := netlink.LinkByIndex(link.Attrs().ParentIndex)
+		if err == nil {
+			if parent.Attrs().Name == m[0]+"-bond" {
+				return errors.New("requested vlan is already used by other function")
+			}
+		}
 	}
 	// Check if master exists
-	link, err := netlink.LinkByName(m[0] + "-bond")
+	link, err = netlink.LinkByName(m[0] + "-bond")
 	if err != nil {
 		return err
 	}
