@@ -30,8 +30,7 @@ type SriovResource struct {
 
 type SriovSelectors struct {
 	PCIAddresses []string `json:"pciAddresses,omitempty"`
-	Drivers      []string `json:"drivers,omitempty"`
-	PFNames      []string `json:"pfNames,omitempty"`
+	RootDevices  []string `json:"rootDevices,omitempty"`
 }
 
 func getVlanInterface(vlanIfName string) bool {
@@ -112,7 +111,6 @@ func getNodeTopology(provider string) ([]byte, error) {
 		SriovPools: make(map[string]datatypes.NicMap),
 	}
 
-	name2nic := make(map[string]datatypes.Nic)
 	pci2nic := make(map[string]datatypes.Nic)
 	bondIndex := make(map[string]int)
 	bondIndex["tenant-bond"] = 0
@@ -144,20 +142,22 @@ func getNodeTopology(provider string) ([]byte, error) {
 			return nil, err
 		}
 		if provider == "openstack" {
-			if strings.HasPrefix(link.Attrs().Name, "eth") {
-				pciAddress, err := ethHandle.BusInfo(link.Attrs().Name)
-				if err != nil {
-					return nil, err
-				}
-				pci2nic[pciAddress] = datatypes.Nic{
-					Name:       link.Attrs().Name,
-					MacAddress: macAddress}
+			if !strings.HasPrefix(link.Attrs().Name, "eth") {
+				continue
 			}
+		} else {
+			if len(link.Attrs().Vfs) == 0 {
+				continue
+			}
+		}
+		pciAddress, err := ethHandle.BusInfo(link.Attrs().Name)
+		if err != nil {
+			return nil, err
 		}
 		nic := datatypes.Nic{
 			Name:       link.Attrs().Name,
 			MacAddress: macAddress}
-		name2nic[nic.Name] = nic
+		pci2nic[pciAddress] = nic
 		bondName := ""
 		if bondIndex["tenant-bond"] > 0 && link.Attrs().MasterIndex == bondIndex["tenant-bond"] {
 			bondName = "tenant-bond"
@@ -188,25 +188,22 @@ func getNodeTopology(provider string) ([]byte, error) {
 		} else {
 			for _, resource := range resourceList.Resources {
 				topology.SriovPools[resource.ResourceName] = make(datatypes.NicMap)
+				pciAddresses := []string{}
 				if provider == "openstack" {
-					for _, pciAddress := range resource.Selectors.PCIAddresses {
-						nic, ok := pci2nic[pciAddress]
-						if ok {
-							var tmp []byte
-							tmp, _ = json.Marshal(nic)
-							var jsonNic datatypes.JsonNic
-							json.Unmarshal(tmp, &jsonNic)
-							topology.SriovPools[resource.ResourceName][nic.MacAddress] = jsonNic
-						}
-					}
+					pciAddresses = resource.Selectors.PCIAddresses
 				} else {
-					for _, pfName := range resource.Selectors.PFNames {
-						nic, ok := name2nic[pfName]
-						if ok {
-							var tmp []byte
-							tmp, _ = json.Marshal(nic)
-							var jsonNic datatypes.JsonNic
-							json.Unmarshal(tmp, &jsonNic)
+					pciAddresses = resource.Selectors.RootDevices
+				}
+				for _, pciAddress := range pciAddresses {
+					nic, ok := pci2nic[pciAddress]
+					if ok {
+						var tmp []byte
+						tmp, _ = json.Marshal(nic)
+						var jsonNic datatypes.JsonNic
+						json.Unmarshal(tmp, &jsonNic)
+						if provider == "openstack" {
+							topology.SriovPools[resource.ResourceName][nic.MacAddress] = jsonNic
+						} else {
 							topology.SriovPools[resource.ResourceName][nic.Name] = jsonNic
 						}
 					}
