@@ -31,6 +31,8 @@ type PodInfo struct {
 	PodNamespace   string
 	Provider       string
 	ProviderConfig string
+	VlanMap        map[string][]string
+	SriovVlanMap   map[string][]string
 }
 
 type NetworkStatus map[string][]string
@@ -75,6 +77,9 @@ func NewTopologyController(
 		nodesSynced:           nodeInformer.Informer().HasSynced,
 		workqueue:             workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), controllerAgentName),
 	}
+
+	TopologyController.podInfo.VlanMap = make(map[string][]string)
+	TopologyController.podInfo.SriovVlanMap = make(map[string][]string)
 
 	netAttachDefInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    TopologyController.handleNetAttachDefAddEvent,
@@ -186,12 +191,27 @@ func (c *TopologyController) handleNetAttachDefAddEvent(obj interface{}) {
 	klog.Infof("handling nad addition of %s/%s", namespace, name)
 
 	// Check NAD for action
-	_, trigger, err := datatypes.ShouldTriggerTopoAction(nad)
+	netConf, trigger, err := datatypes.ShouldTriggerTopoAction(nad)
 	if err != nil || !trigger {
-		klog.Infof("%s/%s is not an action triggering nad: ignored", namespace, name)
+		klog.Infof("NAD ADD of %s/%s is not an action triggering nad: ignored", namespace, name)
 		return
 	}
 	// Handle network attach
+	var numUsers int
+	if netConf.Type == "ipvlan" {
+		numUsers = datatypes.AddToVlanMap(c.podInfo.VlanMap, namespace+"/"+name, netConf.Master)
+		klog.Infof("IPVLAN vlan interface %s has %d users", netConf.Master, numUsers)
+		if numUsers > 1 {
+			return
+		}
+	}
+	if netConf.Type == "sriov" && netConf.Vlan > 0 {
+		numUsers = datatypes.AddToVlanMap(c.podInfo.SriovVlanMap, namespace+"/"+name, netConf.Master)
+		klog.Infof("SIROV vlan interface %s has %d users", netConf.Master, numUsers)
+		if numUsers > 1 {
+			return
+		}
+	}
 	workItem := WorkItem{action: datatypes.CreateAttach, newNad: nad}
 	c.workqueue.Add(workItem)
 }
@@ -208,14 +228,25 @@ func (c *TopologyController) handleNetAttachDefDeleteEvent(obj interface{}) {
 	klog.Infof("handling nad deletion of %s/%s", namespace, name)
 
 	// Check NAD for action
-	_, trigger, err := datatypes.ShouldTriggerTopoAction(nad)
+	netConf, trigger, err := datatypes.ShouldTriggerTopoAction(nad)
 	if err != nil || !trigger {
-		klog.Infof("%s/%s is not an action triggering nad: ignored", namespace, name)
+		klog.Infof("NAD DELETE of %s/%s is not an action triggering nad: ignored", namespace, name)
 		return
 	}
 	// Handle network detach
-	workItem := WorkItem{action: datatypes.DeleteDetach, oldNad: nad, newNad: nad}
-	c.workqueue.Add(workItem)
+	var numUsers int
+	if netConf.Type == "ipvlan" {
+		numUsers = datatypes.DelFromVlanMap(c.podInfo.VlanMap, namespace+"/"+name, netConf.Master)
+		klog.Infof("IPVLAN vlan interface %s has %d users", netConf.Master, numUsers)
+	}
+	if netConf.Type == "sriov" && netConf.Vlan > 0 {
+		numUsers = datatypes.DelFromVlanMap(c.podInfo.SriovVlanMap, namespace+"/"+name, netConf.Master)
+		klog.Infof("SRIOV vlan interface %s has %d users", netConf.Master, numUsers)
+	}
+	if numUsers == 0 {
+		workItem := WorkItem{action: datatypes.DeleteDetach, oldNad: nad, newNad: nad}
+		c.workqueue.Add(workItem)
+	}
 }
 
 func (c *TopologyController) handleNetAttachDefUpdateEvent(oldObj, newObj interface{}) {
@@ -240,10 +271,27 @@ func (c *TopologyController) handleNetAttachDefUpdateEvent(oldObj, newObj interf
 	klog.Infof("handling nad update of %s/%s", namespace, name)
 
 	// Check NAD for action
-	updateAction, err := datatypes.ShouldTriggerTopoUpdate(oldNad, newNad)
+	updateAction, netConf, err := datatypes.ShouldTriggerTopoUpdate(oldNad, newNad)
 	if err != nil || updateAction == 0 {
-		klog.Infof("%s/%s does not have an action triggering update: ignored", namespace, name)
+		klog.Infof("NAD UPDATE of %s/%s is not an action triggering nad: ignored", namespace, name)
 		return
+	}
+	if updateAction == datatypes.UpdateAttach {
+		var numUsers int
+		if netConf.Type == "ipvlan" {
+			numUsers = datatypes.AddToVlanMap(c.podInfo.VlanMap, namespace+"/"+name, netConf.Master)
+			klog.Infof("IPVLAN vlan interface %s has %d users", netConf.Master, numUsers)
+			if numUsers > 1 {
+				return
+			}
+		}
+		if netConf.Type == "sriov" && netConf.Vlan > 0 {
+			numUsers = datatypes.AddToVlanMap(c.podInfo.SriovVlanMap, namespace+"/"+name, netConf.Master)
+			klog.Infof("SRIOV vlan interface %s has %d users", netConf.Master, numUsers)
+			if numUsers > 1 {
+				return
+			}
+		}
 	}
 	workItem := WorkItem{action: updateAction, oldNad: oldNad, newNad: newNad}
 	c.workqueue.Add(workItem)

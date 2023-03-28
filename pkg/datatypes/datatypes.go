@@ -153,6 +153,12 @@ func ShouldTriggerTopoAction(nad *netattachdef.NetworkAttachmentDefinition) (Net
 		if !ok || len(network) == 0 {
 			return netConf, false, nil
 		}
+		if netConf.Vlan < 1 || netConf.Vlan > 4095 {
+			return netConf, false, fmt.Errorf("Nokia Proprietary IPVLAN vlan field has invalid value. Valid range 1..4095")
+		}
+		if !strings.HasPrefix(netConf.Master, "tenant.") && !strings.HasPrefix(netConf.Master, "provider.") {
+			return netConf, false, fmt.Errorf("Nokia Proprietary IPVLAN master field has invalid value. Valid value after mutation is tenant.vlan or provider.vlan")
+		}
 		return netConf, true, nil
 	}
 	if netConf.Type == "sriov" {
@@ -210,37 +216,38 @@ func ShouldTriggerTopoAction(nad *netattachdef.NetworkAttachmentDefinition) (Net
 					return netConf, false, nil
 				}
 				return netConf, true, nil
-                        } else {
-                                return netConf, false, fmt.Errorf("vlan value is out of bound, valid range (0..4095) ")
-                        }
+			} else {
+				return netConf, false, fmt.Errorf("vlan value is out of bound, valid range (0..4095) ")
+			}
 		}
 	}
 	return netConf, false, nil
 }
 
-func ShouldTriggerTopoUpdate(oldNad, newNad *netattachdef.NetworkAttachmentDefinition) (NadAction, error) {
+func ShouldTriggerTopoUpdate(oldNad, newNad *netattachdef.NetworkAttachmentDefinition) (NadAction, NetConf, error) {
 	// Check NAD for action
 	oldNetConf, trigger1, _ := ShouldTriggerTopoAction(oldNad)
 	newNetConf, trigger2, _ := ShouldTriggerTopoAction(newNad)
 
 	if !trigger1 && !trigger2 {
-		return 0, nil
+		return 0, newNetConf, nil
 	}
 	if !trigger1 && trigger2 {
-		return UpdateAttach, nil
+		return UpdateAttach, newNetConf, nil
 	}
+	// Implemented but not officially supported
 	if trigger1 && !trigger2 {
-		return 0, fmt.Errorf("NAD change from FSS eligible to not eligble is not allowed")
+		return 0, newNetConf, fmt.Errorf("NAD change from FSS eligible to not eligble is not allowed")
 	}
 	// Handle network change
 	if oldNetConf.Type != newNetConf.Type {
-		return 0, fmt.Errorf("NAD type change is not allowed")
+		return 0, newNetConf, fmt.Errorf("NAD type change is not allowed")
 	}
 	if oldNetConf.Vlan > 0 && oldNetConf.Vlan != newNetConf.Vlan {
-		return 0, fmt.Errorf("NAD vlan change is not allowed")
+		return 0, newNetConf, fmt.Errorf("NAD vlan change is not allowed")
 	}
 	if oldNetConf.Vlan == 0 && oldNetConf.VlanTrunk != newNetConf.VlanTrunk {
-		return 0, fmt.Errorf("SRIOV NAD vlan_trunk change is not allowed")
+		return 0, newNetConf, fmt.Errorf("SRIOV NAD vlan_trunk change is not allowed")
 	}
 	anno1 := oldNad.GetAnnotations()
 	anno2 := newNad.GetAnnotations()
@@ -248,7 +255,7 @@ func ShouldTriggerTopoUpdate(oldNad, newNad *netattachdef.NetworkAttachmentDefin
 		sriovOverlays1, _ := anno1[SriovOverlaysKey]
 		sriovOverlays2, _ := anno2[SriovOverlaysKey]
 		if sriovOverlays1 != sriovOverlays2 {
-			return 0, fmt.Errorf("NAD SRIOV overlays change is not allowed")
+			return 0, newNetConf, fmt.Errorf("NAD SRIOV overlays change is not allowed")
 		}
 	} else {
 		proj1, _ := anno1[ExtProjectIDKey]
@@ -256,16 +263,55 @@ func ShouldTriggerTopoUpdate(oldNad, newNad *netattachdef.NetworkAttachmentDefin
 		proj2, _ := anno2[ExtProjectIDKey]
 		net2, _ := anno2[ExtNetworkIDKey]
 		if proj1 != proj2 {
-			return 0, fmt.Errorf("NAD project change is not allowed")
+			return 0, newNetConf, fmt.Errorf("NAD project change is not allowed")
 		}
 		if net1 != net2 {
-			return 0, fmt.Errorf("NAD network change is not allowed")
+			return 0, newNetConf, fmt.Errorf("NAD network change is not allowed")
 		}
 	}
 	ns1, _ := anno1[NodeSelectorKey]
 	ns2, _ := anno2[NodeSelectorKey]
 	if ns1 == ns2 {
-		return 0, nil
+		return 0, newNetConf, nil
 	}
-	return UpdateAttachDetach, nil
+	return UpdateAttachDetach, newNetConf, nil
+}
+
+func AddToVlanMap(vlanMap map[string][]string, nadName string, vlanIfName string) int {
+	_, ok := vlanMap[vlanIfName]
+	if !ok {
+		vlanMap[vlanIfName] = append(vlanMap[vlanIfName], nadName)
+		return 1
+	}
+	numUsers := len(vlanMap[vlanIfName])
+	nadExists := false
+	for _, v := range vlanMap[vlanIfName] {
+		if v == nadName {
+			nadExists = true
+			break
+		}
+	}
+	if !nadExists {
+		vlanMap[vlanIfName] = append(vlanMap[vlanIfName], nadName)
+		numUsers = numUsers + 1
+	}
+	return numUsers
+}
+
+func DelFromVlanMap(vlanMap map[string][]string, nadName string, vlanIfName string) int {
+	_, ok := vlanMap[vlanIfName]
+	if !ok {
+		return 0
+	}
+	numUsers := len(vlanMap[vlanIfName])
+	for k, v := range vlanMap[vlanIfName] {
+		if v == nadName {
+			vlanMap[vlanIfName] = append(vlanMap[vlanIfName][:k], vlanMap[vlanIfName][k+1:]...)
+			numUsers = numUsers - 1
+		}
+	}
+	if numUsers == 0 {
+		delete(vlanMap, vlanIfName)
+	}
+	return numUsers
 }

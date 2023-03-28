@@ -3,7 +3,9 @@ package netcontroller
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -52,57 +54,84 @@ func getVlanInterface(vlanIfName string) bool {
 	return true
 }
 
-func createVlanInterface(vlanIfName string, vlanId int) error {
-	// Check if vlan interface already exists
-	if getVlanInterface(vlanIfName) {
-		klog.Infof("requested vlan interface %s already exists", vlanIfName)
-		return nil
-	}
+func createVlanInterface(vlanMap map[string][]string, nadName string, vlanIfName string) (int, error) {
 	m := strings.Split(vlanIfName, ".")
-	// Check if vlanId is already used
+	// Check if vlan interface is created by other function
 	vlanByOther := "vlan" + m[1]
 	link, err := netlink.LinkByName(vlanByOther)
 	if err == nil {
 		parent, err := netlink.LinkByIndex(link.Attrs().ParentIndex)
 		if err == nil {
 			if parent.Attrs().Name == m[0]+"-bond" {
-				return errors.New("requested vlan is already used by other function")
+				klog.Infof("requested vlan is created by other function with name %s", vlanByOther)
+				datatypes.AddToVlanMap(vlanMap, "other/"+vlanByOther, vlanIfName)
+				// Check if vlan interface altname for self is already created
+				if getVlanInterface(vlanIfName) {
+					return datatypes.AddToVlanMap(vlanMap, nadName, vlanIfName), nil
+				}
+				cmd := exec.Command("/usr/sbin/ip", "link", "property", "add", "dev", vlanByOther, "altname", vlanIfName)
+				err := cmd.Run()
+				if err != nil {
+					errString := fmt.Sprintf("add altname %s to %s failed: %s", vlanIfName, vlanByOther, err.Error())
+					return 1, errors.New(errString)
+				}
+				return datatypes.AddToVlanMap(vlanMap, nadName, vlanIfName), nil
 			}
 		}
+	}
+	// Check if vlan interface is already created by self
+	if getVlanInterface(vlanIfName) {
+		klog.Infof("requested vlan interface %s is already created", vlanIfName)
+		return datatypes.AddToVlanMap(vlanMap, nadName, vlanIfName), nil
 	}
 	// Check if master exists
 	link, err = netlink.LinkByName(m[0] + "-bond")
 	if err != nil {
-		return err
+		return 0, err
 	}
 	// Create the vlan interface
 	vlan := netlink.Vlan{}
 	vlan.ParentIndex = link.Attrs().Index
 	vlan.Name = vlanIfName
+	vlanId, _ := strconv.Atoi(m[1])
 	vlan.VlanId = vlanId
 	err = netlink.LinkAdd(&vlan)
 	if err != nil {
-		return err
+		return 0, err
 	}
+	// Bring up the vlan interface
 	err = netlink.LinkSetUp(&vlan)
 	if err != nil {
-		return err
+		klog.Errorf("Failed at bring up %s: %s", vlanIfName, err.Error())
 	}
-	return nil
+	return datatypes.AddToVlanMap(vlanMap, vlanIfName, nadName), nil
 }
 
-func deleteVlanInterface(vlanIfName string) error {
+func deleteVlanInterface(vlanMap map[string][]string, nadName string, vlanIfName string) (int, error) {
+	m := strings.Split(vlanIfName, ".")
+	// Check if vlan interface is created by other function
+	vlanByOther := "vlan" + m[1]
+	link, err := netlink.LinkByName(vlanByOther)
+	if err == nil {
+		parent, err := netlink.LinkByIndex(link.Attrs().ParentIndex)
+		if err == nil {
+			if parent.Attrs().Name == m[0]+"-bond" {
+				klog.Infof("requested vlan is created by other function with name %s", vlanByOther)
+				datatypes.AddToVlanMap(vlanMap, "other/"+vlanByOther, vlanIfName)
+			}
+		}
+	}
+	numUsers := datatypes.DelFromVlanMap(vlanMap, nadName, vlanIfName)
+	if numUsers > 0 {
+		return numUsers, nil
+	}
 	// Check if vlan interface exists
-	link, err := netlink.LinkByName(vlanIfName)
-	if err != nil {
-		return nil
+	link, err = netlink.LinkByName(vlanIfName)
+	if err == nil {
+		// Delete the vlan interface
+		err = netlink.LinkDel(link)
 	}
-	// Delete the vlan interface
-	err = netlink.LinkDel(link)
-	if err != nil {
-		return err
-	}
-	return nil
+	return 0, err
 }
 
 func getNodeTopology(provider string) ([]byte, error) {

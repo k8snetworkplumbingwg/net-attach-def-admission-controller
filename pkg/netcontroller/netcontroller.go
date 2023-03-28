@@ -2,6 +2,7 @@ package netcontroller
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -31,13 +32,13 @@ type NodeInfo struct {
 	Provider   string
 	NodeName   string
 	NodeLabels map[string]string
+	VlanMap    map[string][]string
 }
 
 type WorkItem struct {
 	action     datatypes.NadAction
 	nad        *netattachdef.NetworkAttachmentDefinition
 	vlanIfName string
-	vlanId     int
 }
 
 // NetworkController is the controller implementation for VLAN Operator
@@ -80,6 +81,7 @@ func NewNetworkController(
 		Provider:   provider,
 		NodeName:   nodeName,
 		NodeLabels: node.Labels,
+		VlanMap:    make(map[string][]string),
 	}
 
 	NetworkController := &NetworkController{
@@ -103,7 +105,7 @@ func NewNetworkController(
 
 	klog.Infof("Start netcontroller on %s for %s", nodeInfo.NodeName, nodeInfo.Provider)
 	for k, v := range nodeInfo.NodeLabels {
-		klog.Infof("%s=%s", k, v)
+		klog.V(3).Infof("%s=%s", k, v)
 	}
 	klog.Infof("topology=%s", topology)
 
@@ -168,12 +170,12 @@ func (c *NetworkController) handleNetAttachDefAddEvent(obj interface{}) {
 	// Check NAD for action
 	netConf, trigger := c.shouldTriggerAction(nad)
 	if !trigger {
-		klog.Infof("not an action triggering nad, ignored")
+		klog.Infof("NAD ADD of %s/%s is not an action triggering nad: ignored", namespace, name)
 		return
 	}
 
 	// Create vlan interface
-	workItem := WorkItem{action: datatypes.Create, nad: nad, vlanIfName: netConf.Master, vlanId: netConf.Vlan}
+	workItem := WorkItem{action: datatypes.Create, nad: nad, vlanIfName: netConf.Master}
 	c.workqueue.Add(workItem)
 }
 
@@ -202,13 +204,13 @@ func (c *NetworkController) handleNetAttachDefUpdateEvent(oldObj, newObj interfa
 	oldNetConf, trigger1 := c.shouldTriggerAction(oldNad)
 	newNetConf, trigger2 := c.shouldTriggerAction(newNad)
 	if trigger1 == trigger2 {
-		klog.Infof("not an action triggering update, ignored")
+		klog.Infof("NAD UPDATE of %s/%s is not an action triggering nad: ignored", namespace, name)
 		return
 	}
 
 	// Check if node becomes eligible
 	if !trigger1 && trigger2 {
-		workItem := WorkItem{action: datatypes.Create, nad: newNad, vlanIfName: newNetConf.Master, vlanId: newNetConf.Vlan}
+		workItem := WorkItem{action: datatypes.Create, nad: newNad, vlanIfName: newNetConf.Master}
 		c.workqueue.Add(workItem)
 	}
 
@@ -233,7 +235,7 @@ func (c *NetworkController) handleNetAttachDefDeleteEvent(obj interface{}) {
 	// Check NAD for action
 	netConf, trigger := c.shouldTriggerAction(nad)
 	if !trigger {
-		klog.Infof("not an action triggering nad, ignored")
+		klog.Infof("NAD DELETE of %s/%s is not an action triggering nad: ignored", namespace, name)
 		return
 	}
 
@@ -269,6 +271,7 @@ func (c *NetworkController) handleNodeUpdateEvent(oldObj, newObj interface{}) {
 	if reflect.DeepEqual(c.nodeInfo.NodeLabels, newNodeLabels) {
 		return
 	}
+	klog.Infof("handling node %s label change", c.nodeInfo.NodeName)
 	c.nodeInfo.NodeLabels = newNodeLabels
 	nadList, err := c.netAttachDefClientSet.K8sCniCncfIoV1().NetworkAttachmentDefinitions("").List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
@@ -290,7 +293,7 @@ func (c *NetworkController) handleNodeUpdateEvent(oldObj, newObj interface{}) {
 		} else {
 			// Create vlan interface if not exists
 			if !getVlanInterface(netConf.Master) {
-				workItem := WorkItem{action: datatypes.Create, nad: &nad, vlanIfName: netConf.Master, vlanId: netConf.Vlan}
+				workItem := WorkItem{action: datatypes.Create, nad: &nad, vlanIfName: netConf.Master}
 				c.workqueue.Add(workItem)
 			}
 		}
@@ -351,9 +354,17 @@ func (c *NetworkController) processItem(workItem WorkItem) error {
 	case datatypes.Create:
 		{
 			klog.Infof("Create vlan interface of %s", workItem.vlanIfName)
-			err := createVlanInterface(workItem.vlanIfName, workItem.vlanId)
-			if err != nil {
-				klog.Errorf("vlan interface is not created because %s", err.Error())
+			nadName := fmt.Sprintf("%s/%s", workItem.nad.ObjectMeta.Namespace, workItem.nad.ObjectMeta.Name)
+			numUsers, err := createVlanInterface(c.nodeInfo.VlanMap, nadName, workItem.vlanIfName)
+			if err == nil {
+				if numUsers == 0 {
+					klog.Infof("vlan interface %s is created", workItem.vlanIfName)
+				} else {
+					klog.Infof("vlan interface %s now has %d users", workItem.vlanIfName, numUsers)
+				}
+				c.updateNadAnnotations(workItem.nad, "created")
+			} else {
+				klog.Errorf("vlan interface %s creation failed: %s", workItem.vlanIfName, err.Error())
 				c.updateNadAnnotations(workItem.nad, "creation-failed")
 			}
 			return err
@@ -361,9 +372,16 @@ func (c *NetworkController) processItem(workItem WorkItem) error {
 	case datatypes.Delete:
 		{
 			klog.Infof("Delete vlan interface of %s", workItem.vlanIfName)
-			err := deleteVlanInterface(workItem.vlanIfName)
+			nadName := fmt.Sprintf("%s/%s", workItem.nad.ObjectMeta.Namespace, workItem.nad.ObjectMeta.Name)
+			numUsers, err := deleteVlanInterface(c.nodeInfo.VlanMap, nadName, workItem.vlanIfName)
 			if err != nil {
-				klog.Errorf("vlan interface deletion failed because %s", err.Error())
+				klog.Errorf("vlan interface %s deletion failed: %s", workItem.vlanIfName, err.Error())
+				c.updateNadAnnotations(workItem.nad, "deletion-failed")
+			}
+			if numUsers == 0 {
+				klog.Infof("vlan interface %s is deleted", workItem.vlanIfName)
+			} else {
+				klog.Infof("vlan interface %s now has %d users", workItem.vlanIfName, numUsers)
 			}
 			c.updateNadAnnotations(workItem.nad, "deleted")
 			return err
