@@ -32,6 +32,7 @@ type SriovResource struct {
 
 type SriovSelectors struct {
 	PCIAddresses []string `json:"pciAddresses,omitempty"`
+	PFNames      []string `json:"pfNames,omitempty"`
 	RootDevices  []string `json:"rootDevices,omitempty"`
 }
 
@@ -140,6 +141,7 @@ func getNodeTopology(provider string) ([]byte, error) {
 		SriovPools: make(map[string]datatypes.NicMap),
 	}
 
+	name2nic := make(map[string]datatypes.Nic)
 	pci2nic := make(map[string]datatypes.Nic)
 	bondIndex := make(map[string]int)
 	bondIndex["tenant-bond"] = 0
@@ -186,6 +188,7 @@ func getNodeTopology(provider string) ([]byte, error) {
 		nic := datatypes.Nic{
 			Name:       link.Attrs().Name,
 			MacAddress: macAddress}
+		name2nic[nic.Name] = nic
 		pci2nic[pciAddress] = nic
 		bondName := ""
 		if bondIndex["tenant-bond"] > 0 && link.Attrs().MasterIndex == bondIndex["tenant-bond"] {
@@ -217,14 +220,26 @@ func getNodeTopology(provider string) ([]byte, error) {
 		} else {
 			for _, resource := range resourceList.Resources {
 				topology.SriovPools[resource.ResourceName] = make(datatypes.NicMap)
-				pciAddresses := []string{}
+				isPCIAddress := true
+				devices := []string{}
 				if provider == "openstack" {
-					pciAddresses = resource.Selectors.PCIAddresses
+					devices = resource.Selectors.PCIAddresses
 				} else {
-					pciAddresses = resource.Selectors.RootDevices
+					if len(resource.Selectors.RootDevices) > 0 {
+						devices = resource.Selectors.RootDevices
+					} else if len(resource.Selectors.PFNames) > 0 {
+						isPCIAddress = false
+						devices = resource.Selectors.PFNames
+					}
 				}
-				for _, pciAddress := range pciAddresses {
-					nic, ok := pci2nic[pciAddress]
+				for _, device := range devices {
+					var nic datatypes.Nic
+					ok := false
+					if isPCIAddress {
+						nic, ok = pci2nic[device]
+					} else {
+						nic, ok = pci2nic[device]
+					}
 					if ok {
 						var tmp []byte
 						tmp, _ = json.Marshal(nic)
