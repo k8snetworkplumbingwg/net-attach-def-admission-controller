@@ -3,6 +3,7 @@ package topocontroller
 import (
 	"context"
 	"reflect"
+	"strconv"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -197,19 +198,33 @@ func (c *TopologyController) handleNetAttachDefAddEvent(obj interface{}) {
 		return
 	}
 	// Handle network attach
-	var numUsers int
-	if netConf.Type == "ipvlan" {
-		numUsers = datatypes.AddToVlanMap(c.podInfo.VlanMap, namespace+"/"+name, netConf.Master)
-		klog.Infof("IPVLAN vlan interface %s has %d users", netConf.Master, numUsers)
-		if numUsers > 1 {
-			return
+	switch netConf.Type {
+	case "ipvlan":
+		{
+			numUsers := datatypes.AddToVlanMap(c.podInfo.VlanMap, namespace+"/"+name, netConf.Master)
+			klog.Infof("IPVLAN vlan interface %s has %d users", netConf.Master, numUsers)
+			if numUsers > 1 {
+				return
+			}
 		}
-	}
-	if netConf.Type == "sriov" && netConf.Vlan > 0 {
-		numUsers = datatypes.AddToVlanMap(c.podInfo.SriovVlanMap, namespace+"/"+name, netConf.Master)
-		klog.Infof("SIROV vlan interface %s has %d users", netConf.Master, numUsers)
-		if numUsers > 1 {
-			return
+	case "sriov":
+		{
+			sriovResource, _ := nad.GetAnnotations()[datatypes.SriovResourceKey]
+			if len(netConf.VlanTrunk) > 0 {
+				sriovMaster := sriovResource + "." + netConf.VlanTrunk
+				numUsers := datatypes.AddToVlanMap(c.podInfo.SriovVlanMap, namespace+"/"+name, sriovMaster)
+				klog.Infof("SRIOV vlan trunk %s has %d users", sriovMaster, numUsers)
+				if numUsers > 1 {
+					return
+				}
+			} else if netConf.Vlan > 0 {
+				sriovMaster := sriovResource + "." + strconv.Itoa(netConf.Vlan)
+				numUsers := datatypes.AddToVlanMap(c.podInfo.SriovVlanMap, namespace+"/"+name, sriovMaster)
+				klog.Infof("SRIOV vlan interface %s has %d users", sriovMaster, numUsers)
+				if numUsers > 1 {
+					return
+				}
+			}
 		}
 	}
 	workItem := WorkItem{action: datatypes.CreateAttach, newNad: nad}
@@ -234,19 +249,37 @@ func (c *TopologyController) handleNetAttachDefDeleteEvent(obj interface{}) {
 		return
 	}
 	// Handle network detach
-	var numUsers int
-	if netConf.Type == "ipvlan" {
-		numUsers = datatypes.DelFromVlanMap(c.podInfo.VlanMap, namespace+"/"+name, netConf.Master)
-		klog.Infof("IPVLAN vlan interface %s has %d users", netConf.Master, numUsers)
+	switch netConf.Type {
+	case "ipvlan":
+		{
+			numUsers := datatypes.DelFromVlanMap(c.podInfo.VlanMap, namespace+"/"+name, netConf.Master)
+			klog.Infof("IPVLAN vlan interface %s has %d users", netConf.Master, numUsers)
+			if numUsers > 0 {
+				return
+			}
+		}
+	case "sriov":
+		{
+			sriovResource, _ := nad.GetAnnotations()[datatypes.SriovResourceKey]
+			if len(netConf.VlanTrunk) > 0 {
+				sriovMaster := sriovResource + "." + netConf.VlanTrunk
+				numUsers := datatypes.DelFromVlanMap(c.podInfo.SriovVlanMap, namespace+"/"+name, sriovMaster)
+				klog.Infof("SRIOV vlan trunk %s has %d users", sriovMaster, numUsers)
+				if numUsers > 0 {
+					return
+				}
+			} else if netConf.Vlan > 0 {
+				sriovMaster := sriovResource + "." + strconv.Itoa(netConf.Vlan)
+				numUsers := datatypes.DelFromVlanMap(c.podInfo.SriovVlanMap, namespace+"/"+name, sriovMaster)
+				klog.Infof("SRIOV vlan interface %s has %d users", sriovMaster, numUsers)
+				if numUsers > 0 {
+					return
+				}
+			}
+		}
 	}
-	if netConf.Type == "sriov" && netConf.Vlan > 0 {
-		numUsers = datatypes.DelFromVlanMap(c.podInfo.SriovVlanMap, namespace+"/"+name, netConf.Master)
-		klog.Infof("SRIOV vlan interface %s has %d users", netConf.Master, numUsers)
-	}
-	if numUsers == 0 {
-		workItem := WorkItem{action: datatypes.DeleteDetach, oldNad: nad, newNad: nad}
-		c.workqueue.Add(workItem)
-	}
+	workItem := WorkItem{action: datatypes.DeleteDetach, oldNad: nad, newNad: nad}
+	c.workqueue.Add(workItem)
 }
 
 func (c *TopologyController) handleNetAttachDefUpdateEvent(oldObj, newObj interface{}) {
@@ -277,19 +310,64 @@ func (c *TopologyController) handleNetAttachDefUpdateEvent(oldObj, newObj interf
 		return
 	}
 	if updateAction == datatypes.UpdateAttach {
-		var numUsers int
-		if netConf.Type == "ipvlan" {
-			numUsers = datatypes.AddToVlanMap(c.podInfo.VlanMap, namespace+"/"+name, netConf.Master)
-			klog.Infof("IPVLAN vlan interface %s has %d users", netConf.Master, numUsers)
-			if numUsers > 1 {
-				return
+		switch netConf.Type {
+		case "ipvlan":
+			{
+				numUsers := datatypes.AddToVlanMap(c.podInfo.VlanMap, namespace+"/"+name, netConf.Master)
+				klog.Infof("IPVLAN vlan interface %s has %d users", netConf.Master, numUsers)
+				if numUsers > 1 {
+					return
+				}
+			}
+		case "sriov":
+			{
+				sriovResource, _ := newNad.GetAnnotations()[datatypes.SriovResourceKey]
+				if len(netConf.VlanTrunk) > 0 {
+					sriovMaster := sriovResource + "." + netConf.VlanTrunk
+					numUsers := datatypes.AddToVlanMap(c.podInfo.SriovVlanMap, namespace+"/"+name, sriovMaster)
+					klog.Infof("SRIOV vlan trunk %s has %d users", sriovMaster, numUsers)
+					if numUsers > 1 {
+						return
+					}
+				} else if netConf.Vlan > 0 {
+					sriovMaster := sriovResource + "." + strconv.Itoa(netConf.Vlan)
+					numUsers := datatypes.AddToVlanMap(c.podInfo.SriovVlanMap, namespace+"/"+name, sriovMaster)
+					klog.Infof("SRIOV vlan interface %s has %d users", sriovMaster, numUsers)
+					if numUsers > 1 {
+						return
+					}
+				}
 			}
 		}
-		if netConf.Type == "sriov" && netConf.Vlan > 0 {
-			numUsers = datatypes.AddToVlanMap(c.podInfo.SriovVlanMap, namespace+"/"+name, netConf.Master)
-			klog.Infof("SRIOV vlan interface %s has %d users", netConf.Master, numUsers)
-			if numUsers > 1 {
-				return
+	}
+	if updateAction == datatypes.UpdateDetach {
+		switch netConf.Type {
+		case "ipvlan":
+			{
+				numUsers := datatypes.DelFromVlanMap(c.podInfo.VlanMap, namespace+"/"+name, netConf.Master)
+				klog.Infof("IPVLAN vlan interface %s has %d users", netConf.Master, numUsers)
+				if numUsers > 0 {
+					return
+				}
+			}
+		case "sriov":
+			{
+				sriovResource, _ := oldNad.GetAnnotations()[datatypes.SriovResourceKey]
+				if len(netConf.VlanTrunk) > 0 {
+					sriovMaster := sriovResource + "." + netConf.VlanTrunk
+					numUsers := datatypes.DelFromVlanMap(c.podInfo.SriovVlanMap, namespace+"/"+name, sriovMaster)
+					klog.Infof("SRIOV vlan trunk %s has %d users", sriovMaster, numUsers)
+					if numUsers > 0 {
+						return
+					}
+				} else if netConf.Vlan > 0 {
+					sriovMaster := sriovResource + "." + strconv.Itoa(netConf.Vlan)
+					numUsers := datatypes.DelFromVlanMap(c.podInfo.SriovVlanMap, namespace+"/"+name, sriovMaster)
+					klog.Infof("SRIOV vlan interface %s has %d users", sriovMaster, numUsers)
+					if numUsers > 0 {
+						return
+					}
+				}
 			}
 		}
 	}

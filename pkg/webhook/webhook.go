@@ -418,7 +418,7 @@ func validateForFabricOperator(operation v1beta1.Operation, oldNad, netAttachDef
 		return nil
 	}
 
-	// Check NAD for topology action
+	// Check NAD for invalid format
 	var thisConf datatypes.NetConf
 	var err error
 	if operation == "CREATE" {
@@ -434,11 +434,6 @@ func validateForFabricOperator(operation v1beta1.Operation, oldNad, netAttachDef
 				return err
 			}
 		}
-	}
-
-	// Ignore SRIOV untagged vlan for vlan sharing
-	if thisConf.Type == "sriov" && thisConf.Vlan == 0 {
-		return nil
 	}
 
 	// Check NAD for vlan sharing
@@ -463,17 +458,58 @@ func validateForFabricOperator(operation v1beta1.Operation, oldNad, netAttachDef
 		if thisConf.Vlan != otherConf.Vlan {
 			continue
 		}
-		otherProject, _ := nad.GetAnnotations()[datatypes.ExtProjectIDKey]
-		otherNetwork, _ := nad.GetAnnotations()[datatypes.ExtNetworkIDKey]
-		if project != otherProject || network != otherNetwork {
-			errString := fmt.Sprintf("%s/%s and %s/%s has the same vlan (%d) but different extProject (%s vs %s) and/or extNetwork (%s vs %s)",
-				namespace, name, nad.ObjectMeta.Namespace, nad.ObjectMeta.Name, thisConf.Vlan, project, otherProject, network, otherNetwork)
-			return errors.New(errString)
+		vlanMode := true
+		switch thisConf.Type {
+		case "ipvlan":
+			{
+				// Check if using the same NIC bond
+				if strings.HasPrefix(thisConf.Master, "tenant") && !strings.HasPrefix(otherConf.Master, "tenant") {
+					continue
+				}
+				if strings.HasPrefix(thisConf.Master, "provider") && !strings.HasPrefix(otherConf.Master, "provider") {
+					continue
+				}
+			}
+		case "sriov":
+			{
+				// Check if using the same resource pool
+				thisSriovResource, _ := netAttachDef.GetAnnotations()[datatypes.SriovResourceKey]
+				otherSriovResource, _ := nad.GetAnnotations()[datatypes.SriovResourceKey]
+				if thisSriovResource != otherSriovResource {
+					continue
+				}
+				if len(thisConf.VlanTrunk) > 0 {
+					if thisConf.VlanTrunk != otherConf.VlanTrunk {
+						continue
+					}
+					vlanMode = false
+				} else if thisConf.Vlan == 0 {
+					// Ignore untagged vlan
+					continue
+				}
+			}
+		}
+		if vlanMode {
+			otherProject, _ := nad.GetAnnotations()[datatypes.ExtProjectIDKey]
+			otherNetwork, _ := nad.GetAnnotations()[datatypes.ExtNetworkIDKey]
+			if project != otherProject || network != otherNetwork {
+				errString := fmt.Sprintf("%s/%s and %s/%s has the same vlan (%d) but different extProject/extNetwork (%s/%s vs %s/%s)",
+					namespace, name, nad.ObjectMeta.Namespace, nad.ObjectMeta.Name, thisConf.Vlan, project, network, otherProject, otherNetwork)
+				return errors.New(errString)
+			}
+		} else {
+			thisSriovOverlays, _ := netAttachDef.GetAnnotations()[datatypes.SriovOverlaysKey]
+			otherSriovOverlays, _ := nad.GetAnnotations()[datatypes.SriovOverlaysKey]
+			if thisSriovOverlays != otherSriovOverlays {
+				errString := fmt.Sprintf("%s/%s and %s/%s has the same vlanTrunk (%s) but different Overlays (%s vs %s)",
+					namespace, name, nad.ObjectMeta.Namespace, nad.ObjectMeta.Name, thisConf.Vlan, thisSriovOverlays, otherSriovOverlays)
+				return errors.New(errString)
+			}
 		}
 		otherNs, _ := nad.GetAnnotations()[datatypes.NodeSelectorKey]
 		if ns != otherNs {
-			errString := fmt.Sprintf("%s/%s and %s/%s has the same vlan (%d) but different nodeSelector (%s vs %s)",
-				namespace, name, nad.ObjectMeta.Namespace, nad.ObjectMeta.Name, thisConf.Vlan, ns, otherNs)
+			errString := fmt.Sprintf("%s/%s and %s/%s has the same vlan toplogy but different nodeSelector (%s vs %s)",
+				namespace, name, nad.ObjectMeta.Namespace, nad.ObjectMeta.Name, ns, otherNs)
 			return errors.New(errString)
 		}
 	}

@@ -142,7 +142,31 @@ func ShouldTriggerTopoAction(nad *netattachdef.NetworkAttachmentDefinition) (Net
 		return netConf, false, nil
 	}
 	// Check NAD type
-	if netConf.Type == "ipvlan" {
+	vlanMode := true
+	switch netConf.Type {
+	case "ipvlan":
+		{
+			if netConf.Vlan < 1 || netConf.Vlan > 4095 {
+				return netConf, false, fmt.Errorf("Nokia Proprietary IPVLAN vlan field has invalid value. Valid range 1..4095")
+			}
+			if !strings.HasPrefix(netConf.Master, "tenant") && !strings.HasPrefix(netConf.Master, "provider") {
+				return netConf, false, fmt.Errorf("Nokia Proprietary IPVLAN master field has invalid value. Valid value starts with 'tenant' or 'provider'")
+			}
+		}
+	case "sriov":
+		{
+			resourceName, ok := annotationsMap[SriovResourceKey]
+			if !ok || len(resourceName) == 0 {
+				return netConf, false, fmt.Errorf("SRIOV NAD requires resource name")
+			}
+			if len(netConf.VlanTrunk) > 0 {
+				vlanMode = false
+			} else if netConf.Vlan < 0 || netConf.Vlan > 4095 {
+				return netConf, false, fmt.Errorf("vlan value is out of bound, valid range (0..4095) ")
+			}
+		}
+	}
+	if vlanMode {
 		// Check extProjectID
 		project, ok := annotationsMap[ExtProjectIDKey]
 		if !ok || len(project) == 0 {
@@ -153,75 +177,44 @@ func ShouldTriggerTopoAction(nad *netattachdef.NetworkAttachmentDefinition) (Net
 		if !ok || len(network) == 0 {
 			return netConf, false, nil
 		}
-		if netConf.Vlan < 1 || netConf.Vlan > 4095 {
-			return netConf, false, fmt.Errorf("Nokia Proprietary IPVLAN vlan field has invalid value. Valid range 1..4095")
+	} else {
+		vlanIds, err := GetVlanIds(netConf.VlanTrunk)
+		if err != nil {
+			return netConf, false, fmt.Errorf("Invalid vlan_trunk in CNI: %s", err.Error())
 		}
-		if !strings.HasPrefix(netConf.Master, "tenant.") && !strings.HasPrefix(netConf.Master, "provider.") {
-			return netConf, false, fmt.Errorf("Nokia Proprietary IPVLAN master field has invalid value. Valid value after mutation is tenant.vlan or provider.vlan")
+		// Check Overlays
+		jsonOverlays, ok := annotationsMap[SriovOverlaysKey]
+		if !ok || len(jsonOverlays) == 0 {
+			return netConf, false, fmt.Errorf("Missing %s in annotations", SriovOverlaysKey)
 		}
-		return netConf, true, nil
-	}
-	if netConf.Type == "sriov" {
-		resourceName, ok := annotationsMap[SriovResourceKey]
-		if !ok || len(resourceName) == 0 {
-			return netConf, false, fmt.Errorf("SRIOV NAD requires resource name")
+		var overlays []map[string]string
+		err = json.Unmarshal([]byte(jsonOverlays), &overlays)
+		if err != nil {
+			return netConf, false, err
 		}
-		if len(netConf.VlanTrunk) > 0 {
-			vlanIds, err := GetVlanIds(netConf.VlanTrunk)
+		var vlanRanges []string
+		for _, overlay := range overlays {
+			_, ok1 := overlay["extProjectID"]
+			_, ok2 := overlay["extNetworkID"]
+			vlanRange, ok3 := overlay["vlanRange"]
+			if !ok1 || !ok2 || !ok3 {
+				return netConf, false, fmt.Errorf("Invalid overlay value in %s", overlay)
+			}
+			_, err = GetVlanIds(vlanRange)
 			if err != nil {
-				return netConf, false, fmt.Errorf("Invalid vlan_trunk in CNI: %s", err.Error())
+				return netConf, false, fmt.Errorf("Invalid vlan range %s in %s: %s", vlanRange, overlay, err.Error())
 			}
-			// Check Overlays
-			jsonOverlays, ok := annotationsMap[SriovOverlaysKey]
-			if !ok || len(jsonOverlays) == 0 {
-				return netConf, false, fmt.Errorf("Missing %s in annotations", SriovOverlaysKey)
-			}
-			var overlays []map[string]string
-			err = json.Unmarshal([]byte(jsonOverlays), &overlays)
-			if err != nil {
-				return netConf, false, err
-			}
-			var vlanRanges []string
-			for _, overlay := range overlays {
-				_, ok1 := overlay["extProjectID"]
-				_, ok2 := overlay["extNetworkID"]
-				vlanRange, ok3 := overlay["vlanRange"]
-				if !ok1 || !ok2 || !ok3 {
-					return netConf, false, fmt.Errorf("Invalid overlay value in %s", overlay)
-				}
-				_, err = GetVlanIds(vlanRange)
-				if err != nil {
-					return netConf, false, fmt.Errorf("Invalid vlan range %s in %s: %s", vlanRange, overlay, err.Error())
-				}
-				vlanRanges = append(vlanRanges, vlanRange)
-			}
-			vlanTrunk := strings.Join(vlanRanges, ",")
-			overlayVlanIds, _ := GetVlanIds(vlanTrunk)
-			sort.Ints(overlayVlanIds)
-			sort.Ints(vlanIds)
-			if !reflect.DeepEqual(vlanIds, overlayVlanIds) {
-				return netConf, false, fmt.Errorf("Different vlan ranges found in CNI and annotations")
-			}
-			return netConf, true, nil
-		} else {
-			if netConf.Vlan >= 0 && netConf.Vlan <= 4095 {
-				// Check extProjectID
-				project, ok := annotationsMap[ExtProjectIDKey]
-				if !ok || len(project) == 0 {
-					return netConf, false, nil
-				}
-				// Check extNetworkID
-				network, ok := annotationsMap[ExtNetworkIDKey]
-				if !ok || len(network) == 0 {
-					return netConf, false, nil
-				}
-				return netConf, true, nil
-			} else {
-				return netConf, false, fmt.Errorf("vlan value is out of bound, valid range (0..4095) ")
-			}
+			vlanRanges = append(vlanRanges, vlanRange)
+		}
+		vlanTrunk := strings.Join(vlanRanges, ",")
+		overlayVlanIds, _ := GetVlanIds(vlanTrunk)
+		sort.Ints(overlayVlanIds)
+		sort.Ints(vlanIds)
+		if !reflect.DeepEqual(vlanIds, overlayVlanIds) {
+			return netConf, false, fmt.Errorf("Different vlan ranges found in CNI and annotations")
 		}
 	}
-	return netConf, false, nil
+	return netConf, true, nil
 }
 
 func ShouldTriggerTopoUpdate(oldNad, newNad *netattachdef.NetworkAttachmentDefinition) (NadAction, NetConf, error) {
@@ -238,26 +231,25 @@ func ShouldTriggerTopoUpdate(oldNad, newNad *netattachdef.NetworkAttachmentDefin
 	// Implemented but not officially supported
 	if trigger1 && !trigger2 {
 		return 0, newNetConf, fmt.Errorf("NAD change from FSS eligible to not eligble is not allowed")
+		//return UpdateDetach, newNetConf, nil
 	}
 	// Handle network change
 	if oldNetConf.Type != newNetConf.Type {
 		return 0, newNetConf, fmt.Errorf("NAD type change is not allowed")
 	}
-	if oldNetConf.Vlan > 0 && oldNetConf.Vlan != newNetConf.Vlan {
+	if oldNetConf.Vlan != newNetConf.Vlan {
 		return 0, newNetConf, fmt.Errorf("NAD vlan change is not allowed")
 	}
-	if oldNetConf.Vlan == 0 && oldNetConf.VlanTrunk != newNetConf.VlanTrunk {
-		return 0, newNetConf, fmt.Errorf("SRIOV NAD vlan_trunk change is not allowed")
+	vlanMode := true
+	if len(oldNetConf.VlanTrunk) > 0 {
+		vlanMode = false
+		if oldNetConf.VlanTrunk != newNetConf.VlanTrunk {
+			return 0, newNetConf, fmt.Errorf("SRIOV NAD vlan_trunk change is not allowed")
+		}
 	}
 	anno1 := oldNad.GetAnnotations()
 	anno2 := newNad.GetAnnotations()
-	if newNetConf.Type == "sriov" && newNetConf.Vlan == 0 {
-		sriovOverlays1, _ := anno1[SriovOverlaysKey]
-		sriovOverlays2, _ := anno2[SriovOverlaysKey]
-		if sriovOverlays1 != sriovOverlays2 {
-			return 0, newNetConf, fmt.Errorf("NAD SRIOV overlays change is not allowed")
-		}
-	} else {
+	if vlanMode {
 		proj1, _ := anno1[ExtProjectIDKey]
 		net1, _ := anno1[ExtNetworkIDKey]
 		proj2, _ := anno2[ExtProjectIDKey]
@@ -267,6 +259,12 @@ func ShouldTriggerTopoUpdate(oldNad, newNad *netattachdef.NetworkAttachmentDefin
 		}
 		if net1 != net2 {
 			return 0, newNetConf, fmt.Errorf("NAD network change is not allowed")
+		}
+	} else {
+		sriovOverlays1, _ := anno1[SriovOverlaysKey]
+		sriovOverlays2, _ := anno2[SriovOverlaysKey]
+		if sriovOverlays1 != sriovOverlays2 {
+			return 0, newNetConf, fmt.Errorf("NAD SRIOV overlays change is not allowed")
 		}
 	}
 	ns1, _ := anno1[NodeSelectorKey]
