@@ -282,6 +282,12 @@ func (c *NetworkController) handleNodeUpdateEvent(oldObj, newObj interface{}) {
 		name := nad.ObjectMeta.Name
 		namespace := nad.ObjectMeta.Namespace
 		klog.Infof("Checking NAD %s/%s", namespace, name)
+		// Check nodeSelector
+		annotationsMap := nad.GetAnnotations()
+		ns, ok := annotationsMap[datatypes.NodeSelectorKey]
+		if !ok || len(ns) == 0 {
+			return
+		}
 		// Check NAD for action
 		netConf, trigger := c.shouldTriggerAction(&nad)
 		if !trigger {

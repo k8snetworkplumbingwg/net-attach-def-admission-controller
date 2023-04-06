@@ -238,7 +238,7 @@ func getNodeTopology(provider string) ([]byte, error) {
 					if isPCIAddress {
 						nic, ok = pci2nic[device]
 					} else {
-						nic, ok = pci2nic[device]
+						nic, ok = name2nic[device]
 					}
 					if ok {
 						var tmp []byte
