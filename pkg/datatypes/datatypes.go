@@ -190,7 +190,7 @@ func ShouldTriggerTopoAction(nad *netattachdef.NetworkAttachmentDefinition) (Net
 		var overlays []map[string]string
 		err = json.Unmarshal([]byte(jsonOverlays), &overlays)
 		if err != nil {
-			return netConf, false, err
+			return netConf, false, fmt.Errorf("Invalid %s format in annotations: %s", SriovOverlaysKey, err.Error())
 		}
 		var vlanRanges []string
 		for _, overlay := range overlays {
@@ -220,8 +220,11 @@ func ShouldTriggerTopoAction(nad *netattachdef.NetworkAttachmentDefinition) (Net
 func ShouldTriggerTopoUpdate(oldNad, newNad *netattachdef.NetworkAttachmentDefinition) (NadAction, NetConf, error) {
 	// Check NAD for action
 	oldNetConf, trigger1, _ := ShouldTriggerTopoAction(oldNad)
-	newNetConf, trigger2, _ := ShouldTriggerTopoAction(newNad)
+	newNetConf, trigger2, err := ShouldTriggerTopoAction(newNad)
 
+	if err != nil {
+		return 0, newNetConf, err
+	}
 	if !trigger1 && !trigger2 {
 		return 0, newNetConf, nil
 	}
@@ -243,9 +246,6 @@ func ShouldTriggerTopoUpdate(oldNad, newNad *netattachdef.NetworkAttachmentDefin
 	vlanMode := true
 	if len(oldNetConf.VlanTrunk) > 0 {
 		vlanMode = false
-		if oldNetConf.VlanTrunk != newNetConf.VlanTrunk {
-			return 0, newNetConf, fmt.Errorf("SRIOV NAD vlan_trunk change is not allowed")
-		}
 	}
 	anno1 := oldNad.GetAnnotations()
 	anno2 := newNad.GetAnnotations()
@@ -261,14 +261,28 @@ func ShouldTriggerTopoUpdate(oldNad, newNad *netattachdef.NetworkAttachmentDefin
 			return 0, newNetConf, fmt.Errorf("NAD network change is not allowed")
 		}
 	} else {
-		sriovOverlays1, _ := anno1[SriovOverlaysKey]
-		sriovOverlays2, _ := anno2[SriovOverlaysKey]
-		if sriovOverlays1 != sriovOverlays2 {
-			return 0, newNetConf, fmt.Errorf("NAD SRIOV overlays change is not allowed")
+		if oldNetConf.VlanTrunk != newNetConf.VlanTrunk {
+			vlanRange1, _ := GetVlanIds(oldNetConf.VlanTrunk)
+			vlanRange2, _ := GetVlanIds(newNetConf.VlanTrunk)
+			checkset := make(map[int]bool)
+			for _, v := range vlanRange2 {
+				checkset[v] = true
+			}
+			for _, v := range vlanRange1 {
+				if !checkset[v] {
+					return 0, newNetConf, fmt.Errorf("SRIOV NAD vlan_trunk range can only increase")
+				}
+			}
 		}
 	}
 	ns1, _ := anno1[NodeSelectorKey]
 	ns2, _ := anno2[NodeSelectorKey]
+	if !vlanMode && oldNetConf.VlanTrunk != newNetConf.VlanTrunk {
+		if ns1 != ns2 {
+			return 0, newNetConf, fmt.Errorf("SRIOV NAD vlan_trunk range and nodeSelector are not allowed to change together")
+		}
+		return UpdateAttach, newNetConf, nil
+	}
 	if ns1 == ns2 {
 		return 0, newNetConf, nil
 	}
