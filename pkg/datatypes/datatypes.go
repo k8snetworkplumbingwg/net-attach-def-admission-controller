@@ -16,8 +16,8 @@ import (
 const (
 	SriovResourceKey   = "k8s.v1.cni.cncf.io/resourceName"
 	NodeSelectorKey    = "k8s.v1.cni.cncf.io/nodeSelector"
-	ExtProjectIDKey    = "nokia.com/extProjectID"
-	ExtNetworkIDKey    = "nokia.com/extNetworkID"
+	ExtProjectNameKey  = "nokia.com/extProjectName"
+	ExtNetworkNameKey  = "nokia.com/extNetworkName"
 	SriovOverlaysKey   = "nokia.com/sriov-vf-vlan-trunk-overlays"
 	NetworkTopologyKey = "nokia.com/network-topology"
 	NetworkStatusKey   = "nokia.com/network-status"
@@ -167,13 +167,13 @@ func ShouldTriggerTopoAction(nad *netattachdef.NetworkAttachmentDefinition) (Net
 		}
 	}
 	if vlanMode {
-		// Check extProjectID
-		project, ok := annotationsMap[ExtProjectIDKey]
+		// Check extProjectName
+		project, ok := annotationsMap[ExtProjectNameKey]
 		if !ok || len(project) == 0 {
 			return netConf, false, nil
 		}
-		// Check extNetworkID
-		network, ok := annotationsMap[ExtNetworkIDKey]
+		// Check extNetworkName
+		network, ok := annotationsMap[ExtNetworkNameKey]
 		if !ok || len(network) == 0 {
 			return netConf, false, nil
 		}
@@ -194,8 +194,8 @@ func ShouldTriggerTopoAction(nad *netattachdef.NetworkAttachmentDefinition) (Net
 		}
 		var vlanRanges []string
 		for _, overlay := range overlays {
-			_, ok1 := overlay["extProjectID"]
-			_, ok2 := overlay["extNetworkID"]
+			_, ok1 := overlay["extProjectName"]
+			_, ok2 := overlay["extNetworkName"]
 			vlanRange, ok3 := overlay["vlanRange"]
 			if !ok1 || !ok2 || !ok3 {
 				return netConf, false, fmt.Errorf("Invalid overlay value in %s", overlay)
@@ -250,10 +250,10 @@ func ShouldTriggerTopoUpdate(oldNad, newNad *netattachdef.NetworkAttachmentDefin
 	anno1 := oldNad.GetAnnotations()
 	anno2 := newNad.GetAnnotations()
 	if vlanMode {
-		proj1, _ := anno1[ExtProjectIDKey]
-		net1, _ := anno1[ExtNetworkIDKey]
-		proj2, _ := anno2[ExtProjectIDKey]
-		net2, _ := anno2[ExtNetworkIDKey]
+		proj1, _ := anno1[ExtProjectNameKey]
+		net1, _ := anno1[ExtNetworkNameKey]
+		proj2, _ := anno2[ExtProjectNameKey]
+		net2, _ := anno2[ExtNetworkNameKey]
 		if proj1 != proj2 {
 			return 0, newNetConf, fmt.Errorf("NAD project change is not allowed")
 		}

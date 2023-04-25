@@ -394,9 +394,9 @@ func isFabricOperatorRequired(netAttachDef netv1.NetworkAttachmentDefinition) bo
 	if !ok || len(ns) == 0 {
 		return false
 	}
-	// Check extProjectID and extNetworkID
-	project, ok1 := annotationsMap[datatypes.ExtProjectIDKey]
-	network, ok2 := annotationsMap[datatypes.ExtNetworkIDKey]
+	// Check extProjectName and extNetworkName
+	project, ok1 := annotationsMap[datatypes.ExtProjectNameKey]
+	network, ok2 := annotationsMap[datatypes.ExtNetworkNameKey]
 	if ok1 && len(project) > 0 && ok2 && len(network) > 0 {
 		return true
 	}
@@ -409,7 +409,7 @@ func isFabricOperatorRequired(netAttachDef netv1.NetworkAttachmentDefinition) bo
 }
 
 // validateForFabricOperator verifies following fields
-// annotatoin: 'nodeSelector', 'extNetworkID', 'extProjectID' and 'resourceName'
+// annotatoin: 'nodeSelector', 'extNetworkName', 'extProjectName' and 'resourceName'
 // conf: 'type', 'vlan' and 'vlan_trunk'
 // return err for validation error
 func validateForFabricOperator(operation v1beta1.Operation, oldNad, netAttachDef netv1.NetworkAttachmentDefinition) error {
@@ -443,8 +443,8 @@ func validateForFabricOperator(operation v1beta1.Operation, oldNad, netAttachDef
 	name := netAttachDef.ObjectMeta.Name
 	namespace := netAttachDef.ObjectMeta.Namespace
 	ns, _ := netAttachDef.GetAnnotations()[datatypes.NodeSelectorKey]
-	project, _ := netAttachDef.GetAnnotations()[datatypes.ExtProjectIDKey]
-	network, _ := netAttachDef.GetAnnotations()[datatypes.ExtNetworkIDKey]
+	project, _ := netAttachDef.GetAnnotations()[datatypes.ExtProjectNameKey]
+	network, _ := netAttachDef.GetAnnotations()[datatypes.ExtNetworkNameKey]
 
 	nadList, err := nadAttachDefClientSet.K8sCniCncfIoV1().NetworkAttachmentDefinitions("").List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
@@ -493,8 +493,8 @@ func validateForFabricOperator(operation v1beta1.Operation, oldNad, netAttachDef
 			}
 		}
 		if vlanMode {
-			otherProject, _ := nad.GetAnnotations()[datatypes.ExtProjectIDKey]
-			otherNetwork, _ := nad.GetAnnotations()[datatypes.ExtNetworkIDKey]
+			otherProject, _ := nad.GetAnnotations()[datatypes.ExtProjectNameKey]
+			otherNetwork, _ := nad.GetAnnotations()[datatypes.ExtNetworkNameKey]
 			if project != otherProject || network != otherNetwork {
 				errString := fmt.Sprintf("%s/%s and %s/%s has the same vlan (%d) but different extProject/extNetwork (%s/%s vs %s/%s)",
 					namespace, name, nad.ObjectMeta.Namespace, nad.ObjectMeta.Name, thisConf.Vlan, project, network, otherProject, otherNetwork)

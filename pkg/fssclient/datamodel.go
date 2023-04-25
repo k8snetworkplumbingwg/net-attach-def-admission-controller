@@ -57,12 +57,12 @@ type Deployment struct {
 
 type Tenants []Tenant
 type Tenant struct {
-	DeploymentID      string `json:"deploymentId"`
-	FssWorkloadEvpnID string `json:"fssWorkloadEvpnId"`
-	Name              string `json:"name"`
-	FssManaged        bool   `json:"fssManaged"`
-	ID                string `json:"id"`
-	Status            string `json:"status"`
+	DeploymentID        string `json:"deploymentId"`
+	FssWorkloadEvpnName string `json:"fssWorkloadEvpnName"`
+	Name                string `json:"name"`
+	FssManaged          bool   `json:"fssManaged"`
+	ID                  string `json:"id"`
+	Status              string `json:"status"`
 	/*
 		ExternalID        string `json:"externalId",omitempty`
 		DeployedVersion   int    `json:"deployedVersion",omitempty`
@@ -72,13 +72,13 @@ type Tenant struct {
 
 type Subnets []Subnet
 type Subnet struct {
-	DeploymentID string `json:"deploymentId"`
-	TenantID     string `json:"tenantId"`
-	FssSubnetID  string `json:"fssSubnetId"`
-	Name         string `json:"name"`
-	FssManaged   bool   `json:"fssManaged"`
-	ID           string `json:"id"`
-	Status       string `json:"status"`
+	DeploymentID   string `json:"deploymentId"`
+	TenantID       string `json:"tenantId"`
+	FssSubnetName  string `json:"fssSubnetName"`
+	Name           string `json:"name"`
+	FssManaged     bool   `json:"fssManaged"`
+	ID             string `json:"id"`
+	Status         string `json:"status"`
 	/*
 		ExternalID      string `json:"externalId",omitempty`
 		DeployedVersion int    `json:"deployedVersion",omitempty`
@@ -168,13 +168,13 @@ type HostPortIDByName map[string]string
 type HostPortAssociationIDByPort map[string]string
 
 type Database struct {
-	// Tenants by fssWorkloadEvpnId
+	// Tenants by fssWorkloadEvpnName
 	tenants map[string]Tenant
-	// Subnets by fssSubnetId
+	// Subnets by fssSubnetName
 	subnets map[string]Subnet
-	// HostPortLabelID by fssSubnetId and Vlan
+	// HostPortLabelID by fssSubnetName and Vlan
 	hostPortLabels map[string]HostPortLabelIDByVlan
-	// HostPortLabelID by fssSubnetId and Vlan
+	// HostPortLabelID by fssSubnetName and Vlan
 	attachedLabels map[string]HostPortLabelIDByVlan
 	// HostPortID by HostName and PortName
 	hostPorts map[string]HostPortIDByName

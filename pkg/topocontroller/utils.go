@@ -173,8 +173,8 @@ func (c *TopologyController) handleNetworkAttach(nad *netattachdef.NetworkAttach
 
 	netConf, _ := datatypes.GetNetConf(nad)
 	annotationsMap := nad.GetAnnotations()
-	project, _ := annotationsMap[datatypes.ExtProjectIDKey]
-	network, _ := annotationsMap[datatypes.ExtNetworkIDKey]
+	project, _ := annotationsMap[datatypes.ExtProjectNameKey]
+	network, _ := annotationsMap[datatypes.ExtNetworkNameKey]
 	nodesAttached := []string{}
 	nodesAttachFailed := []string{}
 	nodesInfo := make(map[string]datatypes.NicMap)
@@ -228,7 +228,7 @@ func (c *TopologyController) handleNetworkAttach(nad *netattachdef.NetworkAttach
 		jsonOverlays, _ := annotationsMap[datatypes.SriovOverlaysKey]
 		json.Unmarshal([]byte(jsonOverlays), &overlays)
 	} else {
-		overlay := map[string]string{"extProjectID": project, "extNetworkID": network, "vlanRange": strconv.Itoa(netConf.Vlan)}
+		overlay := map[string]string{"extProjectName": project, "extNetworkName": network, "vlanRange": strconv.Itoa(netConf.Vlan)}
 		overlays = append(overlays, overlay)
 	}
 	nodesError := make(map[string]error)
@@ -237,8 +237,8 @@ func (c *TopologyController) handleNetworkAttach(nad *netattachdef.NetworkAttach
 	}
 	klog.Infof("Handle overlay %+v", overlays)
 	for _, overlay := range overlays {
-		project := overlay["extProjectID"]
-		network := overlay["extNetworkID"]
+		project := overlay["extProjectName"]
+		network := overlay["extNetworkName"]
 		vlanRange := overlay["vlanRange"]
 		nodesStatus, err := c.vlanProvider.Attach(project, network, vlanRange, nodesInfo, action)
 		if err != nil {
@@ -272,8 +272,8 @@ func (c *TopologyController) handleNetworkDetach(nad *netattachdef.NetworkAttach
 
 	netConf, _ := datatypes.GetNetConf(nad)
 	annotationsMap := nad.GetAnnotations()
-	project, _ := annotationsMap[datatypes.ExtProjectIDKey]
-	network, _ := annotationsMap[datatypes.ExtNetworkIDKey]
+	project, _ := annotationsMap[datatypes.ExtProjectNameKey]
+	network, _ := annotationsMap[datatypes.ExtNetworkNameKey]
 	var nodesDetached []string
 	nodesInfo := make(map[string]datatypes.NicMap)
 	for _, node := range nodes {
@@ -322,13 +322,13 @@ func (c *TopologyController) handleNetworkDetach(nad *netattachdef.NetworkAttach
 		jsonOverlays, _ := annotationsMap[datatypes.SriovOverlaysKey]
 		json.Unmarshal([]byte(jsonOverlays), &overlays)
 	} else {
-		overlay := map[string]string{"extProjectID": project, "extNetworkID": network, "vlanRange": strconv.Itoa(netConf.Vlan)}
+		overlay := map[string]string{"extProjectName": project, "extNetworkName": network, "vlanRange": strconv.Itoa(netConf.Vlan)}
 		overlays = append(overlays, overlay)
 	}
 	klog.Infof("Handle overlay %+v", overlays)
 	for _, v := range overlays {
-		project := v["extProjectID"]
-		network := v["extNetworkID"]
+		project := v["extProjectName"]
+		network := v["extNetworkName"]
 		vlanRange := v["vlanRange"]
 		_, err := c.vlanProvider.Detach(project, network, vlanRange, nodesInfo, action)
 		if err != nil {
