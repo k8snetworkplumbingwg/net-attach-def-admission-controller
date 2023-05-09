@@ -451,6 +451,10 @@ func validateForFabricOperator(operation v1beta1.Operation, oldNad, netAttachDef
 		return err
 	}
 	for _, nad := range nadList.Items {
+                othername := nad.ObjectMeta.Name
+                if othername == name {
+                        continue
+                }
 		if !isFabricOperatorRequired(nad) {
 			continue
 		}
