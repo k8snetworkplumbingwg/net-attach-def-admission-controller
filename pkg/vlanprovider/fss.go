@@ -59,7 +59,7 @@ func (p *FssVlanProvider) Attach(fssWorkloadEvpnName, fssSubnetName, vlanRange s
 	vlanIds, _ := datatypes.GetVlanIds(vlanRange)
 	for _, vlanId := range vlanIds {
 		klog.Infof("Attach step 1: get hostPortLabel for vlan %d on fssWorkloadEvpnName %s fssSubnetName %s", vlanId, fssWorkloadEvpnName, fssSubnetName)
-		hostPortLabelID, err := p.fssClient.CreateSubnetInterface(fssWorkloadEvpnName, fssSubnetName, vlanId)
+		fssSubnetId, hostPortLabelID, err := p.fssClient.CreateSubnetInterface(fssWorkloadEvpnName, fssSubnetName, vlanId)
 		if err != nil {
 			return nodesStatus, err
 		}
@@ -71,8 +71,8 @@ func (p *FssVlanProvider) Attach(fssWorkloadEvpnName, fssSubnetName, vlanRange s
 			}
 		}
 		if requestType == datatypes.CreateAttach || requestType == datatypes.UpdateAttach {
-			klog.Infof("Attach step 2: attach hostPortLabel vlan %d on fssSubnetName %s", vlanId, fssSubnetName)
-			err = p.fssClient.AttachSubnetInterface(fssSubnetName, vlanId, hostPortLabelID)
+			klog.Infof("Attach step 2: attach hostPortLabel vlan %d on fssSubnetId %s", vlanId, fssSubnetId)
+			err = p.fssClient.AttachSubnetInterface(fssSubnetId, vlanId, hostPortLabelID)
 			if err != nil {
 				return nodesStatus, err
 			}
@@ -89,13 +89,13 @@ func (p *FssVlanProvider) Detach(fssWorkloadEvpnName, fssSubnetName, vlanRange s
 	vlanIds, _ := datatypes.GetVlanIds(vlanRange)
 	for _, vlanId := range vlanIds {
 		klog.Infof("Detach step 1: get hostPortLabel for vlan %d on fssWorkloadEvpnName %s fssSubnetName %s", vlanId, fssWorkloadEvpnName, fssSubnetName)
-		hostPortLabelID, exists := p.fssClient.GetSubnetInterface(fssWorkloadEvpnName, fssSubnetName, vlanId)
+		fssSubnetId, hostPortLabelID, exists := p.fssClient.GetSubnetInterface(fssWorkloadEvpnName, fssSubnetName, vlanId)
 		if !exists {
 			return nodesStatus, fmt.Errorf("Reqeusted vlan %d does not exist", vlanId)
 		}
 		if requestType == datatypes.DeleteDetach || requestType == datatypes.UpdateDetach {
-			klog.Infof("Detach step 2: delete vlan %d on fssSubnetName %s", vlanId, fssSubnetName)
-			err := p.fssClient.DeleteSubnetInterface(fssSubnetName, vlanId, hostPortLabelID)
+			klog.Infof("Detach step 2: delete vlan %d on fssSubnetId %s", vlanId, fssSubnetId)
+			err := p.fssClient.DeleteSubnetInterface(fssSubnetId, vlanId, hostPortLabelID)
 			if err != nil {
 				return nodesStatus, err
 			}
