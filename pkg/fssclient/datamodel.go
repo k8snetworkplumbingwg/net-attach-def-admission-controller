@@ -58,6 +58,7 @@ type Deployment struct {
 type Tenants []Tenant
 type Tenant struct {
 	DeploymentID        string `json:"deploymentId"`
+	FssWorkloadEvpnID   string `json:"fssWorkloadEvpnId"`
 	FssWorkloadEvpnName string `json:"fssWorkloadEvpnName"`
 	Name                string `json:"name"`
 	FssManaged          bool   `json:"fssManaged"`
@@ -72,13 +73,14 @@ type Tenant struct {
 
 type Subnets []Subnet
 type Subnet struct {
-	DeploymentID   string `json:"deploymentId"`
-	TenantID       string `json:"tenantId"`
-	FssSubnetName  string `json:"fssSubnetName"`
-	Name           string `json:"name"`
-	FssManaged     bool   `json:"fssManaged"`
-	ID             string `json:"id"`
-	Status         string `json:"status"`
+	DeploymentID  string `json:"deploymentId"`
+	TenantID      string `json:"tenantId"`
+	FssSubnetID   string `json:"fssSubnetId"`
+	FssSubnetName string `json:"fssSubnetName"`
+	Name          string `json:"name"`
+	FssManaged    bool   `json:"fssManaged"`
+	ID            string `json:"id"`
+	Status        string `json:"status"`
 	/*
 		ExternalID      string `json:"externalId",omitempty`
 		DeployedVersion int    `json:"deployedVersion",omitempty`
@@ -168,27 +170,33 @@ type HostPortIDByName map[string]string
 type HostPortAssociationIDByPort map[string]string
 
 type Database struct {
-	// Tenants by fssWorkloadEvpnName
+	// Tenants by fssWorkloadEvpnId
 	tenants map[string]Tenant
-	// Subnets by fssSubnetName
+	// Subnets by fssSubnetId
 	subnets map[string]Subnet
-	// HostPortLabelID by fssSubnetName and Vlan
+	// HostPortLabelID by fssSubnetId and Vlan
 	hostPortLabels map[string]HostPortLabelIDByVlan
-	// HostPortLabelID by fssSubnetName and Vlan
+	// HostPortLabelID by fssSubnetId and Vlan
 	attachedLabels map[string]HostPortLabelIDByVlan
 	// HostPortID by HostName and PortName
 	hostPorts map[string]HostPortIDByName
 	// HostPortAssociationIDs by HostPortLabelID and HostPortID
 	attachedPorts map[string][]HostPortAssociationIDByPort
+	// mapping from fssWorkloadEvpnName to fssWorkloadEvpnId
+	workloadMapping map[string]string
+	// mapping from fssSubnetName to fssSubnetId (indexed by fssWorkloadEvpnId)
+	subnetMapping map[string]map[string]string
 }
 
 type EncodedDatabase struct {
-	Tenants        map[string]map[string]interface{}
-	Subnets        map[string]map[string]interface{}
-	HostPortLabels map[string]map[string]string
-	AttachedLabels map[string]map[string]string
-	HostPorts      map[string]HostPortIDByName
-	AttachedPorts  map[string][]HostPortAssociationIDByPort
+	Tenants         map[string]map[string]interface{}
+	Subnets         map[string]map[string]interface{}
+	HostPortLabels  map[string]map[string]string
+	AttachedLabels  map[string]map[string]string
+	HostPorts       map[string]HostPortIDByName
+	AttachedPorts   map[string][]HostPortAssociationIDByPort
+	WorkloadMapping map[string]string
+	SubnetMapping   map[string]map[string]string
 }
 
 func (d *Database) encode() ([]byte, error) {
@@ -233,6 +241,8 @@ func (d *Database) encode() ([]byte, error) {
 	}
 	encoded.HostPorts = d.hostPorts
 	encoded.AttachedPorts = d.attachedPorts
+	encoded.WorkloadMapping = d.workloadMapping
+	encoded.SubnetMapping = d.subnetMapping
 	jsonString, err := json.Marshal(encoded)
 	return jsonString, err
 }
@@ -296,5 +306,16 @@ func (d *Database) decode(jsonString []byte) (Database, error) {
 	}
 	decoded.hostPorts = encoded.HostPorts
 	decoded.attachedPorts = encoded.AttachedPorts
+
+	decoded.workloadMapping = make(map[string]string)
+	for k, v := range encoded.WorkloadMapping {
+		decoded.workloadMapping[k] = v
+	}
+	
+	decoded.subnetMapping = make(map[string]map[string]string)
+	for k, v := range encoded.SubnetMapping {
+		decoded.subnetMapping[k] = v
+	}
+
 	return decoded, nil
 }
