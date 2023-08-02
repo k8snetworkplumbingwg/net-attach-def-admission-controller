@@ -827,14 +827,14 @@ func (f *FssClient) CreateSubnetInterface(fssWorkloadEvpnName string, fssSubnetN
 	return fssSubnetId, hostPortLabel.ID, nil
 }
 
-func (f *FssClient) GetSubnetInterface(fssWorkloadEvpnName string, fssSubnetName string, vlanId int) (string, string, bool) {
+func (f *FssClient) GetSubnetInterface(fssWorkloadEvpnName string, fssSubnetName string, vlanId int) (string, string, string, bool) {
 	fssWorkloadEvpnId, ok := f.database.workloadMapping[fssWorkloadEvpnName]
 	if !ok {
-		return "", "", false
+		return "", "", "", false
 	}
 	fssSubnetId, ok := f.database.subnetMapping[fssWorkloadEvpnId][fssSubnetName]
 	if !ok {
-		return "", "", false
+		return fssWorkloadEvpnId, "", "", false
 	}
 	hostPortLabels := f.database.hostPortLabels[fssSubnetId]
 	vlanType := "value"
@@ -846,9 +846,9 @@ func (f *FssClient) GetSubnetInterface(fssWorkloadEvpnName string, fssSubnetName
 	vlan := Vlan{vlanType, vlanValue}
 	hostPortLabelID, ok := hostPortLabels[vlan]
 	if !ok {
-		return fssSubnetId, "", false
+		return fssWorkloadEvpnId, fssSubnetId, "", false
 	}
-	return fssSubnetId, hostPortLabelID, true
+	return fssWorkloadEvpnId, fssSubnetId, hostPortLabelID, true
 }
 
 func (f *FssClient) AttachSubnetInterface(fssSubnetId string, vlanId int, hostPortLabelID string) error {
@@ -890,7 +890,7 @@ func (f *FssClient) AttachSubnetInterface(fssSubnetId string, vlanId int, hostPo
 	return nil
 }
 
-func (f *FssClient) DeleteSubnetInterface(fssSubnetId string, vlanId int, hostPortLabelID string) error {
+func (f *FssClient) DeleteSubnetInterface(fssWorkloadEvpnId string, fssSubnetId string, vlanId int, hostPortLabelID string, requestType datatypes.NadAction) error {
 	klog.Infof("Delete hostPortLabel %s for fssSubnetId %s and vlanId %d", hostPortLabelID, fssSubnetId, vlanId)
 	var result error
 	vlanType := "value"
@@ -919,6 +919,46 @@ func (f *FssClient) DeleteSubnetInterface(fssSubnetId string, vlanId int, hostPo
 	delete(f.database.hostPortLabels[fssSubnetId], vlan)
 	delete(f.database.attachedLabels[fssSubnetId], vlan)
 	delete(f.database.attachedPorts, hostPortLabelID)
+
+	// In order to prevent hanging resource on the FSS connect, we need to delete the subnet and tenant upon last NAD deletion:
+	// The sequence flow is as follow:
+	// NAD deletion -> handleNetAttachDefDeleteEvent: last NAD on the vlan: DeleteDetach -> processNadItem(DeleteDetach)
+	// ->  handleNetworkDetach -> Detach -> DeleteSubnetInterface -> delete hostport label from subnet
+	// when last hostport label is removed from subnet, we will remove the subnet from FSS connect
+	// when last subnet is removed from tenant, we will remove the tenant from FSS connnect
+	if requestType == datatypes.DeleteDetach {
+		// Check if no more attached label in the subnet, delete the subnet
+		if len(f.database.attachedLabels[fssSubnetId]) == 0 {
+			subnet, ok := f.database.subnets[fssSubnetId]
+			if ok {
+				u := subnetPath + "/" + subnet.ID
+				statusCode, _, err := f.DELETE(u)
+				if err != nil {
+					klog.Errorf("Delete subnet failed with status=%d: %s", statusCode, err.Error())
+				}
+				klog.Infof("subnet %s is deleted", subnet.ID)
+				delete(f.database.subnetMapping[fssWorkloadEvpnId], subnet.FssSubnetName)
+				delete(f.database.subnets, fssSubnetId)
+				delete(f.database.hostPortLabels, fssSubnetId)
+				delete(f.database.attachedLabels, fssSubnetId)
+			}
+			// Check if no more subnet in the tenant, delete the tenant
+			if len(f.database.subnetMapping[fssWorkloadEvpnId]) == 0 {
+				tenant, ok := f.database.tenants[fssWorkloadEvpnId]
+				if ok {
+					u := tenantPath + "/" + tenant.ID
+					statusCode, _, err := f.DELETE(u)
+					if err != nil {
+						klog.Errorf("Delete tenant failed with status=%d: %s", statusCode, err.Error())
+					}
+					klog.Infof("tenant %s is deleted", tenant.ID)
+					delete(f.database.workloadMapping, tenant.FssWorkloadEvpnName)
+					delete(f.database.subnetMapping, fssWorkloadEvpnId)
+					delete(f.database.tenants, fssWorkloadEvpnId)
+				}
+			}
+		}
+	}
 	return result
 }
 

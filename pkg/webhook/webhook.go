@@ -451,10 +451,10 @@ func validateForFabricOperator(operation v1beta1.Operation, oldNad, netAttachDef
 		return err
 	}
 	for _, nad := range nadList.Items {
-                othername := nad.ObjectMeta.Name
-                if othername == name {
-                        continue
-                }
+		othername := nad.ObjectMeta.Name
+		if othername == name {
+			continue
+		}
 		if !isFabricOperatorRequired(nad) {
 			continue
 		}
@@ -483,7 +483,9 @@ func validateForFabricOperator(operation v1beta1.Operation, oldNad, netAttachDef
 				thisSriovResource, _ := netAttachDef.GetAnnotations()[datatypes.SriovResourceKey]
 				otherSriovResource, _ := nad.GetAnnotations()[datatypes.SriovResourceKey]
 				if thisSriovResource != otherSriovResource {
-					continue
+					errString := fmt.Sprintf("%s/%s and %s/%s has the same vlan (%d) but different resourceName (%s vs %s)",
+						namespace, name, nad.ObjectMeta.Namespace, nad.ObjectMeta.Name, thisConf.Vlan, thisSriovResource, otherSriovResource)
+					return errors.New(errString)
 				}
 				if len(thisConf.VlanTrunk) > 0 {
 					if thisConf.VlanTrunk != otherConf.VlanTrunk {

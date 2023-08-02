@@ -249,6 +249,13 @@ func ShouldTriggerTopoUpdate(oldNad, newNad *netattachdef.NetworkAttachmentDefin
 	}
 	anno1 := oldNad.GetAnnotations()
 	anno2 := newNad.GetAnnotations()
+	if newNetConf.Type == "sriov" {
+		resourceName1, _ := anno1[SriovResourceKey]
+		resourceName2, _ := anno2[SriovResourceKey]
+		if resourceName1 != resourceName2 {
+			return 0, newNetConf, fmt.Errorf("SRIOV NAD resourceName change is not allowed")
+		}
+	}
 	if vlanMode {
 		proj1, _ := anno1[ExtProjectNameKey]
 		net1, _ := anno1[ExtNetworkNameKey]

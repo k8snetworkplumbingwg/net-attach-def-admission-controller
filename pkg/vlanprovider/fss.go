@@ -89,13 +89,13 @@ func (p *FssVlanProvider) Detach(fssWorkloadEvpnName, fssSubnetName, vlanRange s
 	vlanIds, _ := datatypes.GetVlanIds(vlanRange)
 	for _, vlanId := range vlanIds {
 		klog.Infof("Detach step 1: get hostPortLabel for vlan %d on fssWorkloadEvpnName %s fssSubnetName %s", vlanId, fssWorkloadEvpnName, fssSubnetName)
-		fssSubnetId, hostPortLabelID, exists := p.fssClient.GetSubnetInterface(fssWorkloadEvpnName, fssSubnetName, vlanId)
+		fssWorkloadEvpnId, fssSubnetId, hostPortLabelID, exists := p.fssClient.GetSubnetInterface(fssWorkloadEvpnName, fssSubnetName, vlanId)
 		if !exists {
 			return nodesStatus, fmt.Errorf("Reqeusted vlan %d does not exist", vlanId)
 		}
 		if requestType == datatypes.DeleteDetach || requestType == datatypes.UpdateDetach {
 			klog.Infof("Detach step 2: delete vlan %d on fssSubnetId %s", vlanId, fssSubnetId)
-			err := p.fssClient.DeleteSubnetInterface(fssSubnetId, vlanId, hostPortLabelID)
+			err := p.fssClient.DeleteSubnetInterface(fssWorkloadEvpnId, fssSubnetId, vlanId, hostPortLabelID, requestType)
 			if err != nil {
 				return nodesStatus, err
 			}
