@@ -32,8 +32,14 @@ type Nic struct {
 type JsonNic map[string]interface{}
 type NicMap map[string]JsonNic
 
+type Bond struct {
+	Mode       string `json:"mode"`
+	MacAddress string `json:"mac-address"`
+	Ports      NicMap
+}
+
 type NodeTopology struct {
-	Bonds      map[string]NicMap
+	Bonds      map[string]Bond
 	SriovPools map[string]NicMap
 }
 

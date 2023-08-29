@@ -89,7 +89,7 @@ func (p *OpenstackVlanProvider) UpdateNodeTopology(name string, topology string)
 		return topology, err
 	}
 	// Check if already updated
-	for _, nic := range nodeTopology.Bonds["tenant-bond"] {
+	for _, nic := range nodeTopology.Bonds["tenant-bond"].Ports {
 		if _, ok := nic["network"]; ok {
 			return topology, nil
 		}
@@ -156,11 +156,11 @@ func (p *OpenstackVlanProvider) UpdateNodeTopology(name string, topology string)
 		}
 		for _, trunk := range allTrunks {
 			if iface.PortID == trunk.PortID {
-				if nic, ok := nodeTopology.Bonds["tenant-bond"][iface.MACAddr]; ok {
+				if nic, ok := nodeTopology.Bonds["tenant-bond"].Ports[iface.MACAddr]; ok {
 					nic["trunk-id"] = trunk.ID
 					nic["network"] = net.Name
 					nic["physnet"] = net.PhysicalNetwork
-					nodeTopology.Bonds["tenant-bond"][iface.MACAddr] = nic
+					nodeTopology.Bonds["tenant-bond"].Ports[iface.MACAddr] = nic
 				} else if nic, ok := nodeTopology.SriovPools[net.Name][iface.MACAddr]; ok {
 					nic["trunk-id"] = trunk.ID
 					nic["network"] = net.Name

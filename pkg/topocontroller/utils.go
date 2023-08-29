@@ -193,9 +193,9 @@ func (c *TopologyController) handleNetworkAttach(nad *netattachdef.NetworkAttach
 		case "ipvlan":
 			{
 				bondName := strings.Split(netConf.Master, ".")[0] + "-bond"
-				nics, ok := nodeTopology.Bonds[bondName]
+				bond, ok := nodeTopology.Bonds[bondName]
 				if ok {
-					nodesInfo[nodeName] = nics
+					nodesInfo[nodeName] = bond.Ports
 				} else {
 					klog.Errorf("Skip attaching %s: node topology is not available for bond %s", nodeName, bondName)
 					nodesAttachFailed = append(nodesAttachFailed, nodeName)
@@ -291,12 +291,12 @@ func (c *TopologyController) handleNetworkDetach(nad *netattachdef.NetworkAttach
 		case "ipvlan":
 			{
 				bondName := strings.Split(netConf.Master, ".")[0] + "-bond"
-				nics, ok := nodeTopology.Bonds[bondName]
+				bond, ok := nodeTopology.Bonds[bondName]
 				if !ok {
 					klog.Errorf("Skip detaching %s: node topology is not available for bond %s", nodeName, bondName)
 					continue
 				}
-				nodesInfo[nodeName] = nics
+				nodesInfo[nodeName] = bond.Ports
 			}
 		case "sriov":
 			{
