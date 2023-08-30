@@ -962,40 +962,59 @@ func (f *FssClient) DeleteSubnetInterface(fssWorkloadEvpnId string, fssSubnetId 
 	return result
 }
 
-func (f *FssClient) AttachHostPort(hostPortLabelID string, node string, port datatypes.JsonNic) error {
+func (f *FssClient) CreateHostPort(node string, port datatypes.JsonNic, isLag bool, parentHostPortID string) (string, error) {
+	portName := port["name"].(string)
+	klog.Infof("Create hostPort for host %s port %s", node, portName)
+	hostPort := HostPort{
+		DeploymentID:     f.deployment.ID,
+		HostName:         node,
+		PortName:         portName,
+		IsLag:            isLag,
+		MacAddress:       port["mac-address"].(string),
+		ParentHostPortID: parentHostPortID,
+	}
+	jsonRequest, _ := json.Marshal(hostPort)
+	statusCode, jsonResponse, err := f.POST(hostPortPath, jsonRequest)
+	if err != nil {
+		return "", err
+	}
+	if statusCode != 201 {
+		var errorResponse ErrorResponse
+		json.Unmarshal(jsonResponse, &errorResponse)
+		klog.Errorf("HostPort error: %+v", errorResponse)
+		return "", fmt.Errorf("Create hostPort failed with status=%d", statusCode)
+	}
+	json.Unmarshal(jsonResponse, &hostPort)
+	klog.Infof("HostPort is created: %+v", hostPort)
+	hostPortID := hostPort.ID
+	f.database.hostPorts[node][portName] = hostPortID
+	return hostPortID, nil
+}
+
+func (f *FssClient) GetHostPort(node string, port string) (string, bool) {
 	hostPorts, ok := f.database.hostPorts[node]
 	if !ok {
 		f.database.hostPorts[node] = make(HostPortIDByName)
 		hostPorts = f.database.hostPorts[node]
 	}
 	// Check if port exists
-	portName := port["name"].(string)
-	hostPortID, ok := hostPorts[portName]
+	hostPortID, ok := hostPorts[port]
 	if !ok {
-		klog.Infof("Create hostPort for host %s port %s", node, portName)
-		hostPort := HostPort{
-			DeploymentID: f.deployment.ID,
-			HostName:     node,
-			PortName:     portName,
-			IsLag:        false,
-			MacAddress:   port["mac-address"].(string),
-		}
-		jsonRequest, _ := json.Marshal(hostPort)
-		statusCode, jsonResponse, err := f.POST(hostPortPath, jsonRequest)
+		return "", false
+	}
+	return hostPortID, true
+}
+
+func (f *FssClient) AttachHostPort(hostPortLabelID string, node string, port datatypes.JsonNic, parentHostPortID string) error {
+	// Check if port exists
+        portName := port["name"].(string)
+	hostPortID, ok := f.GetHostPort(node, portName)
+	var err error
+	if !ok {
+		hostPortID, err = f.CreateHostPort(node, port, false, parentHostPortID)
 		if err != nil {
 			return err
 		}
-		if statusCode != 201 {
-			var errorResponse ErrorResponse
-			json.Unmarshal(jsonResponse, &errorResponse)
-			klog.Errorf("HostPort error: %+v", errorResponse)
-			return fmt.Errorf("Create hostPort failed with status=%d", statusCode)
-		}
-		json.Unmarshal(jsonResponse, &hostPort)
-		klog.Infof("HostPort is created: %+v", hostPort)
-		hostPortID = hostPort.ID
-		f.database.hostPorts[node][portName] = hostPortID
-
 	}
 	// Check if port is already attached
 	for _, v := range f.database.attachedPorts[hostPortLabelID] {

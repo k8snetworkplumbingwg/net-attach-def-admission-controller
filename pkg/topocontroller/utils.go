@@ -177,10 +177,14 @@ func (c *TopologyController) handleNetworkAttach(nad *netattachdef.NetworkAttach
 	network, _ := annotationsMap[datatypes.ExtNetworkNameKey]
 	nodesAttached := []string{}
 	nodesAttachFailed := []string{}
-	nodesInfo := make(map[string]datatypes.NicMap)
+	nodesInfo := make(map[string]datatypes.NodeTopology)
 	for _, node := range nodes {
 		nodeName := node.ObjectMeta.Name
 		nodeAnnotation := node.GetAnnotations()
+		nodeInfo := datatypes.NodeTopology{
+			Bonds:      make(map[string]datatypes.Bond),
+			SriovPools: make(map[string]datatypes.NicMap),
+		}
 		topology, ok := nodeAnnotation[datatypes.NetworkTopologyKey]
 		if !ok {
 			klog.Errorf("Skip attaching %s: node topology is not available", nodeName)
@@ -195,7 +199,7 @@ func (c *TopologyController) handleNetworkAttach(nad *netattachdef.NetworkAttach
 				bondName := strings.Split(netConf.Master, ".")[0] + "-bond"
 				bond, ok := nodeTopology.Bonds[bondName]
 				if ok {
-					nodesInfo[nodeName] = bond.Ports
+					nodeInfo.Bonds[bondName] = bond
 				} else {
 					klog.Errorf("Skip attaching %s: node topology is not available for bond %s", nodeName, bondName)
 					nodesAttachFailed = append(nodesAttachFailed, nodeName)
@@ -209,7 +213,7 @@ func (c *TopologyController) handleNetworkAttach(nad *netattachdef.NetworkAttach
 				sriovPoolName := resourceName[lastInd+1:]
 				nics, ok := nodeTopology.SriovPools[sriovPoolName]
 				if ok {
-					nodesInfo[nodeName] = nics
+					nodeInfo.SriovPools[sriovPoolName] = nics
 				} else {
 					klog.Errorf("Skip attaching %s: node topology is not available for sriov pool %s", nodeName, sriovPoolName)
 					nodesAttachFailed = append(nodesAttachFailed, nodeName)
@@ -217,6 +221,7 @@ func (c *TopologyController) handleNetworkAttach(nad *netattachdef.NetworkAttach
 				}
 			}
 		}
+		nodesInfo[nodeName] = nodeInfo
 	}
 	if len(nodesInfo) == 0 {
 		klog.Infof("Skip the ATTACH procedure: no candidate node found for %s/%s", namespace, name)
@@ -275,9 +280,13 @@ func (c *TopologyController) handleNetworkDetach(nad *netattachdef.NetworkAttach
 	project, _ := annotationsMap[datatypes.ExtProjectNameKey]
 	network, _ := annotationsMap[datatypes.ExtNetworkNameKey]
 	var nodesDetached []string
-	nodesInfo := make(map[string]datatypes.NicMap)
+        nodesInfo := make(map[string]datatypes.NodeTopology)
 	for _, node := range nodes {
 		nodeName := node.ObjectMeta.Name
+                nodeInfo := datatypes.NodeTopology{
+                        Bonds:      make(map[string]datatypes.Bond),
+                        SriovPools: make(map[string]datatypes.NicMap),
+                }
 		nodesDetached = append(nodesDetached, nodeName)
 		nodeAnnotation := node.GetAnnotations()
 		topology, ok := nodeAnnotation[datatypes.NetworkTopologyKey]
@@ -296,7 +305,7 @@ func (c *TopologyController) handleNetworkDetach(nad *netattachdef.NetworkAttach
 					klog.Errorf("Skip detaching %s: node topology is not available for bond %s", nodeName, bondName)
 					continue
 				}
-				nodesInfo[nodeName] = bond.Ports
+                                nodeInfo.Bonds[bondName] = bond
 			}
 		case "sriov":
 			{
@@ -308,9 +317,10 @@ func (c *TopologyController) handleNetworkDetach(nad *netattachdef.NetworkAttach
 					klog.Errorf("Skip detaching %s: node topology is not available for sriov pool %s", nodeName, sriovPoolName)
 					continue
 				}
-				nodesInfo[nodeName] = nics
+                                nodeInfo.SriovPools[sriovPoolName] = nics
 			}
 		}
+                nodesInfo[nodeName] = nodeInfo
 	}
 	if action == datatypes.UpdateDetach && len(nodesInfo) == 0 {
 		klog.Infof("Skip the DETACH procedure: no candidate node found for %s/%s", namespace, name)
@@ -523,10 +533,10 @@ func (c *TopologyController) processNodeItem(workItem WorkItem) error {
 				if !trigger {
 					continue
 				}
-				annotationsMap := nad.GetAnnotations()
-				ns, _ := annotationsMap[datatypes.NodeSelectorKey]
-				var networkStatus NetworkStatus
-				networkStatus = make(map[string][]string)
+                                annotationsMap := nad.GetAnnotations()
+                                ns, _ := annotationsMap[datatypes.NodeSelectorKey]
+                                var networkStatus NetworkStatus
+                                networkStatus = make(map[string][]string)
 				jsonString, ok := annotationsMap[datatypes.NetworkStatusKey]
 				if ok && len(jsonString) > 0 {
 					json.Unmarshal([]byte(jsonString), &networkStatus)
