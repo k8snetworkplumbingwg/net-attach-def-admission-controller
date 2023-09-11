@@ -1,7 +1,7 @@
 package vlanprovider
 
 import (
-        "encoding/json"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -67,32 +67,43 @@ func (p *FssVlanProvider) Attach(fssWorkloadEvpnName, fssSubnetName, vlanRange s
 		for nodeName, nodeTopology := range nodesInfo {
 			for bondName, bond := range nodeTopology.Bonds {
 				parentHostPortID := ""
-                                var result bool;
-                                var err error;
+				var err error
 				if bond.Mode == "802.3ad" {
-				        parentHostPortID, result = p.fssClient.GetHostPort(nodeName, bondName)
-					if !result {
-                                                nic := datatypes.Nic{
-                                                        Name:       bondName,
-                                                        MacAddress: bond.MacAddress}
-                                                var tmp []byte
-                                                tmp, _ = json.Marshal(nic)
-                                                var jsonNic datatypes.JsonNic
-                                                json.Unmarshal(tmp, &jsonNic)
-						parentHostPortID, err = p.fssClient.CreateHostPort(nodeName, jsonNic, true, "")
+					nic := datatypes.Nic{
+						Name:       bondName,
+						MacAddress: bond.MacAddress}
+					var tmp []byte
+					tmp, _ = json.Marshal(nic)
+					var jsonNic datatypes.JsonNic
+					json.Unmarshal(tmp, &jsonNic)
+					parentHostPortID, err = p.fssClient.CreateHostPort(nodeName, jsonNic, true, "")
+					if err != nil {
+						nodesStatus[nodeName] = err
+						continue
+					}
+					klog.Infof("Node host %s Create Parent Port for LACP Bond %s", nodeName, bondName)
+					for portName, port := range nodeTopology.Bonds[bondName].Ports {
+						klog.Infof("Node host %s Create Slave Port %s", nodeName, portName)
+						_, err := p.fssClient.CreateHostPort(nodeName, port, false, parentHostPortID)
 						if err != nil {
 							nodesStatus[nodeName] = err
 							continue
 						}
-                                                klog.Infof("Node host %s Create Parent Port for LACP Bond %s", nodeName, bondName)
 					}
-				}
-				for portName, port := range nodeTopology.Bonds[bondName].Ports {
-					klog.Infof("Attach step 2a: attach hostPortLabel for vlan %d to host %s bond port %s", vlanId, nodeName, portName)
-					err := p.fssClient.AttachHostPort(hostPortLabelID, nodeName, port, parentHostPortID)
+					klog.Infof("Attach step 2a: attach hostPortLabel for vlan %d to host %s parent port %s", vlanId, nodeName, bondName)
+					err := p.fssClient.AttachHostPort(hostPortLabelID, nodeName, jsonNic, "")
 					if err != nil {
 						nodesStatus[nodeName] = err
 						continue
+					}
+				} else {
+					for portName, port := range nodeTopology.Bonds[bondName].Ports {
+						klog.Infof("Attach step 2a: attach hostPortLabel for vlan %d to host %s bond port %s", vlanId, nodeName, portName)
+						err := p.fssClient.AttachHostPort(hostPortLabelID, nodeName, port, parentHostPortID)
+						if err != nil {
+							nodesStatus[nodeName] = err
+							continue
+						}
 					}
 				}
 			}
@@ -145,13 +156,13 @@ func (p *FssVlanProvider) Detach(fssWorkloadEvpnName, fssSubnetName, vlanRange s
 						nodesStatus[nodeName] = err
 					}
 				}
-                                for _, v := range nodeTopology.SriovPools {
-                                        for portName, port := range v {
-                                                klog.Infof("Detach step 2a: detach vlan %d from host %s sriov port %s", vlanId, nodeName, portName)
-                                                err := p.fssClient.DetachHostPort(hostPortLabelID, nodeName, port)
-                                                nodesStatus[nodeName] = err
-                                        }
-                                }
+				for _, v := range nodeTopology.SriovPools {
+					for portName, port := range v {
+						klog.Infof("Detach step 2a: detach vlan %d from host %s sriov port %s", vlanId, nodeName, portName)
+						err := p.fssClient.DetachHostPort(hostPortLabelID, nodeName, port)
+						nodesStatus[nodeName] = err
+					}
+				}
 			}
 		}
 	}
