@@ -513,14 +513,40 @@ func (f *FssClient) Resync(firstRun bool, deploymentID string) error {
 					return fmt.Errorf("Get hostPorts failed with status=%d", statusCode)
 				}
 				var hostPorts HostPorts
+				var lagPorts = make(map[string]HostPortIDByName)
 				json.Unmarshal(jsonResponse, &hostPorts)
 				for _, v1 := range hostPorts {
 					if v.ID == v1.DeploymentID {
-						u := hostPortPath + "/" + v1.ID
+						if !v1.IsLag {
+							u := hostPortPath + "/" + v1.ID
+							klog.Infof("Delete path=%s", u)
+							statusCode, _, err := f.DELETE(u)
+							if err != nil {
+								klog.Errorf("Delete host %s hostPort %s failed with status=%d: %s", v1.HostName, v1.PortName, statusCode, err.Error())
+							}
+							if statusCode != 204 {
+								klog.Errorf("Delete host %s hostPort %s failed with status=%d", v1.HostName, v1.PortName, statusCode)
+							}
+						} else {
+							_, ok := lagPorts[v1.HostName]
+							if !ok {
+								lagPorts[v1.HostName] = make(HostPortIDByName)
+							}
+							lagPorts[v1.HostName][v1.PortName] = v1.ID
+						}
+					}
+				}
+				// delete lag host ports at last
+				for nodeName, lagPortsInNode := range lagPorts {
+					for lagPortName, lagPortId := range lagPortsInNode {
+						u := hostPortPath + "/" + lagPortId
 						klog.Infof("Delete path=%s", u)
 						statusCode, _, err := f.DELETE(u)
 						if err != nil {
-							klog.Errorf("Delete hostPort failed with status=%d: %s", statusCode, err.Error())
+							klog.Errorf("Delete host %s lag hostPort %s failed with status=%d: %s", nodeName, lagPortName, statusCode, err.Error())
+						}
+						if statusCode != 204 {
+							klog.Errorf("Delete host %s lag hostPort %s failed with status=%d", nodeName, lagPortName, statusCode)
 						}
 					}
 				}
@@ -674,6 +700,7 @@ func (f *FssClient) Resync(firstRun bool, deploymentID string) error {
 		return fmt.Errorf("Get hostPorts failed with status=%d", statusCode)
 	}
 	var hostPorts HostPorts
+	var lagPorts = make(map[string]HostPortIDByName)
 	json.Unmarshal(jsonResponse, &hostPorts)
 	for _, v := range hostPorts {
 		if v.DeploymentID == deploymentID {
@@ -689,15 +716,37 @@ func (f *FssClient) Resync(firstRun bool, deploymentID string) error {
 			}
 			// Delete unknown object
 			if !knownObject {
-				u := hostPortPath + "/" + v.ID
-				klog.Warningf("Delete unknown hostPort in server: %s", u)
-				statusCode, _, err := f.DELETE(u)
-				if err != nil {
-					klog.Errorf("Delete hostPort failed: %s", err.Error())
+				if !v.IsLag {
+					u := hostPortPath + "/" + v.ID
+					klog.Warningf("Delete unknown hostPort in server: %s", u)
+					statusCode, _, err := f.DELETE(u)
+					if err != nil {
+						klog.Errorf("Delete hostPort failed: %s", err.Error())
+					}
+					if statusCode != 204 {
+						klog.Errorf("Delete hostPort failed with status=%d", statusCode)
+					}
+				} else {
+					_, ok := lagPorts[v.HostName]
+					if !ok {
+						lagPorts[v.HostName] = make(HostPortIDByName)
+					}
+					lagPorts[v.HostName][v.PortName] = v.ID
 				}
-				if statusCode != 204 {
-					klog.Errorf("Delete hostPort failed with status=%d", statusCode)
-				}
+			}
+		}
+	}
+	// delete lag ports at the last
+	for nodeName, lagPortsToDelete := range lagPorts {
+		for lagPortName, lagPortId := range lagPortsToDelete {
+			u := hostPortPath + "/" + lagPortId
+			klog.Warningf("Delete unknown hostPort in server: %s", u)
+			statusCode, _, err := f.DELETE(u)
+			if err != nil {
+				klog.Errorf("Delete host %s lag hostPort %s failed: %s", nodeName, lagPortName, err.Error())
+			}
+			if statusCode != 204 {
+				klog.Errorf("Delete host %s lag hostPort %s failed with status=%d", nodeName, lagPortName, statusCode)
 			}
 		}
 	}
@@ -963,8 +1012,13 @@ func (f *FssClient) DeleteSubnetInterface(fssWorkloadEvpnId string, fssSubnetId 
 }
 
 func (f *FssClient) CreateHostPort(node string, port datatypes.JsonNic, isLag bool, parentHostPortID string) (string, error) {
+	// Check if port exists
 	portName := port["name"].(string)
-	klog.Infof("Create hostPort for host %s port %s", node, portName)
+	hostPortID, ok := f.GetHostPort(node, portName)
+	if ok {
+		return hostPortID, nil
+	}
+	klog.Infof("Create hostPort for host %s port %s isLag %t with parentPort %s", node, portName, isLag, parentHostPortID)
 	hostPort := HostPort{
 		DeploymentID:     f.deployment.ID,
 		HostName:         node,
@@ -986,7 +1040,7 @@ func (f *FssClient) CreateHostPort(node string, port datatypes.JsonNic, isLag bo
 	}
 	json.Unmarshal(jsonResponse, &hostPort)
 	klog.Infof("HostPort is created: %+v", hostPort)
-	hostPortID := hostPort.ID
+	hostPortID = hostPort.ID
 	f.database.hostPorts[node][portName] = hostPortID
 	return hostPortID, nil
 }
@@ -1005,16 +1059,13 @@ func (f *FssClient) GetHostPort(node string, port string) (string, bool) {
 	return hostPortID, true
 }
 
-func (f *FssClient) AttachHostPort(hostPortLabelID string, node string, port datatypes.JsonNic, parentHostPortID string) error {
+func (f *FssClient) AttachHostPort(hostPortLabelID string, node string, port datatypes.JsonNic) error {
 	// Check if port exists
-        portName := port["name"].(string)
+	portName := port["name"].(string)
 	hostPortID, ok := f.GetHostPort(node, portName)
-	var err error
 	if !ok {
-		hostPortID, err = f.CreateHostPort(node, port, false, parentHostPortID)
-		if err != nil {
-			return err
-		}
+		klog.Errorf("HostPort not exist")
+		return fmt.Errorf("HostPort not exist")
 	}
 	// Check if port is already attached
 	for _, v := range f.database.attachedPorts[hostPortLabelID] {
@@ -1075,12 +1126,36 @@ func (f *FssClient) DetachHostPort(hostPortLabelID string, node string, port dat
 }
 
 func (f *FssClient) DetachNode(nodeName string) {
+	var lagPorts = make(map[string]HostPortIDByName)
 	for k, v := range f.database.hostPorts[nodeName] {
+		if strings.Contains(k, "bond") {
+			_, ok := lagPorts[nodeName]
+			if !ok {
+				lagPorts[nodeName] = make(HostPortIDByName)
+			}
+			lagPorts[nodeName][k] = v
+		} else {
+			u := hostPortPath + "/" + v
+			klog.Infof("Delete hostPort %s for host %s port %s", v, nodeName, k)
+			status, _, err := f.DELETE(u)
+			if err != nil {
+				klog.Errorf("Delete hostPort failed with status=%d: %s", status, err.Error())
+			}
+			if status != 204 {
+				klog.Errorf("Delete hostPort failed with status=%d", status)
+			}
+		}
+	}
+	// delete lag ports last
+	for k, v := range lagPorts[nodeName] {
 		u := hostPortPath + "/" + v
 		klog.Infof("Delete hostPort %s for host %s port %s", v, nodeName, k)
 		status, _, err := f.DELETE(u)
 		if err != nil {
 			klog.Errorf("Delete hostPort failed with status=%d: %s", status, err.Error())
+		}
+		if status != 204 {
+			klog.Errorf("Delete hostPort failed with status=%d", status)
 		}
 	}
 	// Remove locally
