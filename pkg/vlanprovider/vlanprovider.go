@@ -2,6 +2,7 @@ package vlanprovider
 
 import (
 	"fmt"
+
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/nokia/net-attach-def-admission-controller/pkg/datatypes"
@@ -10,8 +11,8 @@ import (
 type VlanProvider interface {
 	Connect(kubernetes.Interface, string) error
 	UpdateNodeTopology(string, string) (string, error)
-	Attach(string, string, string, map[string]datatypes.NicMap, datatypes.NadAction) (map[string]error, error)
-	Detach(string, string, string, map[string]datatypes.NicMap, datatypes.NadAction) (map[string]error, error)
+	Attach(string, string, string, map[string]datatypes.NodeTopology, datatypes.NadAction) (map[string]error, error)
+	Detach(string, string, string, map[string]datatypes.NodeTopology, datatypes.NadAction) (map[string]error, error)
 	DetachNode(string)
 	TxnDone()
 }

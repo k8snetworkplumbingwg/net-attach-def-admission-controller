@@ -1,6 +1,7 @@
 package vlanprovider
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -51,7 +52,9 @@ func (p *FssVlanProvider) UpdateNodeTopology(name string, topology string) (stri
 	return topology, nil
 }
 
-func (p *FssVlanProvider) Attach(fssWorkloadEvpnName, fssSubnetName, vlanRange string, nodesInfo map[string]datatypes.NicMap, requestType datatypes.NadAction) (map[string]error, error) {
+// Attach function input parameter NodesInfo is now a map of NodeTopology
+// either nodeTopology.Bonds or nodeTopology.SriovPools will be filled based on the netConf type is IPVLAN or SRIOV net
+func (p *FssVlanProvider) Attach(fssWorkloadEvpnName, fssSubnetName, vlanRange string, nodesInfo map[string]datatypes.NodeTopology, requestType datatypes.NadAction) (map[string]error, error) {
 	nodesStatus := make(map[string]error)
 	for k, _ := range nodesInfo {
 		nodesStatus[k] = nil
@@ -63,11 +66,66 @@ func (p *FssVlanProvider) Attach(fssWorkloadEvpnName, fssSubnetName, vlanRange s
 		if err != nil {
 			return nodesStatus, err
 		}
-		for k, v := range nodesInfo {
-			for i, port := range v {
-				klog.Infof("Attach step 2a: attach hostPortLabel for vlan %d to host %s port %s", vlanId, k, i)
-				err := p.fssClient.AttachHostPort(hostPortLabelID, k, port)
-				nodesStatus[k] = err
+		for nodeName, nodeTopology := range nodesInfo {
+			for bondName, bond := range nodeTopology.Bonds {
+				if bond.Mode == "802.3ad" {
+					nic := datatypes.Nic{
+						Name:       bondName,
+						MacAddress: bond.MacAddress}
+					var tmp []byte
+					tmp, _ = json.Marshal(nic)
+					var jsonNic datatypes.JsonNic
+					json.Unmarshal(tmp, &jsonNic)
+					// create parent host port
+					parentHostPortID, err := p.fssClient.CreateHostPort(nodeName, jsonNic, true, "")
+					if err != nil {
+						nodesStatus[nodeName] = err
+						continue
+					}
+					for _, port := range nodeTopology.Bonds[bondName].Ports {
+						// create slave host port
+						_, err = p.fssClient.CreateHostPort(nodeName, port, false, parentHostPortID)
+						if err != nil {
+							nodesStatus[nodeName] = err
+							continue
+						}
+					}
+					klog.Infof("Attach step 2a: attach hostPortLabel for vlan %d to host %s parent port %s", vlanId, nodeName, bondName)
+					err = p.fssClient.AttachHostPort(hostPortLabelID, nodeName, jsonNic)
+					if err != nil {
+						nodesStatus[nodeName] = err
+						continue
+					}
+				} else {
+					for portName, port := range nodeTopology.Bonds[bondName].Ports {
+						_, err := p.fssClient.CreateHostPort(nodeName, port, false, "")
+						if err != nil {
+							nodesStatus[nodeName] = err
+							continue
+						}
+						klog.Infof("Attach step 2a: attach hostPortLabel for vlan %d to host %s port %s", vlanId, nodeName, portName)
+						err = p.fssClient.AttachHostPort(hostPortLabelID, nodeName, port)
+						if err != nil {
+							nodesStatus[nodeName] = err
+							continue
+						}
+					}
+				}
+			}
+			for k, v := range nodeTopology.SriovPools {
+				for portName, port := range v {
+					_, err := p.fssClient.CreateHostPort(nodeName, port, false, "")
+					if err != nil {
+						nodesStatus[nodeName] = err
+						continue
+					}
+					klog.Infof("Attach step 2a: attach hostPortLabel for vlan %d to host %s port %s", vlanId, nodeName, portName)
+					err = p.fssClient.AttachHostPort(hostPortLabelID, nodeName, port)
+					if err != nil {
+						nodesStatus[k] = err
+						continue
+					}
+				}
 			}
 		}
 		if requestType == datatypes.CreateAttach || requestType == datatypes.UpdateAttach {
@@ -81,10 +139,10 @@ func (p *FssVlanProvider) Attach(fssWorkloadEvpnName, fssSubnetName, vlanRange s
 	return nodesStatus, nil
 }
 
-func (p *FssVlanProvider) Detach(fssWorkloadEvpnName, fssSubnetName, vlanRange string, nodesInfo map[string]datatypes.NicMap, requestType datatypes.NadAction) (map[string]error, error) {
+func (p *FssVlanProvider) Detach(fssWorkloadEvpnName, fssSubnetName, vlanRange string, nodesInfo map[string]datatypes.NodeTopology, requestType datatypes.NadAction) (map[string]error, error) {
 	nodesStatus := make(map[string]error)
-	for k, _ := range nodesInfo {
-		nodesStatus[k] = nil
+	for nodeName, _ := range nodesInfo {
+		nodesStatus[nodeName] = nil
 	}
 	vlanIds, _ := datatypes.GetVlanIds(vlanRange)
 	for _, vlanId := range vlanIds {
@@ -100,11 +158,33 @@ func (p *FssVlanProvider) Detach(fssWorkloadEvpnName, fssSubnetName, vlanRange s
 				return nodesStatus, err
 			}
 		} else {
-			for k, v := range nodesInfo {
-				for i, port := range v {
-					klog.Infof("Detach step 2a: detach vlan %d from host %s port %s", vlanId, k, i)
-					err := p.fssClient.DetachHostPort(hostPortLabelID, k, port)
-					nodesStatus[k] = err
+			for nodeName, nodeTopology := range nodesInfo {
+				for bondName, bond := range nodeTopology.Bonds {
+					if bond.Mode == "802.3ad" {
+						nic := datatypes.Nic{
+							Name:       bondName,
+							MacAddress: bond.MacAddress}
+						var tmp []byte
+						tmp, _ = json.Marshal(nic)
+						var jsonNic datatypes.JsonNic
+						json.Unmarshal(tmp, &jsonNic)
+						klog.Infof("Detach step 2a: detach vlan %d from host %s parent port %s", vlanId, nodeName, bondName)
+						err := p.fssClient.DetachHostPort(hostPortLabelID, nodeName, jsonNic)
+						nodesStatus[nodeName] = err
+					} else {
+						for portName, port := range nodeTopology.Bonds[bondName].Ports {
+							klog.Infof("Detach step 2a: detach vlan %d from host %s port %s", vlanId, nodeName, portName)
+							err := p.fssClient.DetachHostPort(hostPortLabelID, nodeName, port)
+							nodesStatus[nodeName] = err
+						}
+					}
+				}
+				for _, v := range nodeTopology.SriovPools {
+					for portName, port := range v {
+						klog.Infof("Detach step 2a: detach vlan %d from host %s port %s", vlanId, nodeName, portName)
+						err := p.fssClient.DetachHostPort(hostPortLabelID, nodeName, port)
+						nodesStatus[nodeName] = err
+					}
 				}
 			}
 		}
