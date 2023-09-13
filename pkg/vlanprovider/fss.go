@@ -90,12 +90,12 @@ func (p *FssVlanProvider) Attach(fssWorkloadEvpnName, fssSubnetName, vlanRange s
 							continue
 						}
 					}
+					klog.Infof("Attach step 2a: attach hostPortLabel for vlan %d to host %s parent port %s", vlanId, nodeName, bondName)
 					err = p.fssClient.AttachHostPort(hostPortLabelID, nodeName, jsonNic)
 					if err != nil {
 						nodesStatus[nodeName] = err
 						continue
 					}
-					klog.Infof("Attach step 2a: attach hostPortLabel for vlan %d to host %s parent port %s", vlanId, nodeName, bondName)
 				} else {
 					for portName, port := range nodeTopology.Bonds[bondName].Ports {
 						_, err := p.fssClient.CreateHostPort(nodeName, port, false, "")
@@ -103,12 +103,12 @@ func (p *FssVlanProvider) Attach(fssWorkloadEvpnName, fssSubnetName, vlanRange s
 							nodesStatus[nodeName] = err
 							continue
 						}
+						klog.Infof("Attach step 2a: attach hostPortLabel for vlan %d to host %s port %s", vlanId, nodeName, portName)
 						err = p.fssClient.AttachHostPort(hostPortLabelID, nodeName, port)
 						if err != nil {
 							nodesStatus[nodeName] = err
 							continue
 						}
-						klog.Infof("Attach step 2a: attach hostPortLabel for vlan %d to host %s port %s", vlanId, nodeName, portName)
 					}
 				}
 			}
@@ -119,12 +119,12 @@ func (p *FssVlanProvider) Attach(fssWorkloadEvpnName, fssSubnetName, vlanRange s
 						nodesStatus[nodeName] = err
 						continue
 					}
+					klog.Infof("Attach step 2a: attach hostPortLabel for vlan %d to host %s port %s", vlanId, nodeName, portName)
 					err = p.fssClient.AttachHostPort(hostPortLabelID, nodeName, port)
 					if err != nil {
 						nodesStatus[k] = err
 						continue
 					}
-					klog.Infof("Attach step 2a: attach hostPortLabel for vlan %d to host %s port %s", vlanId, nodeName, portName)
 				}
 			}
 		}
