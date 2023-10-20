@@ -43,6 +43,7 @@ type Deployment struct {
 	AdminUp  bool   `json:"adminUp"`
 	Name     string `json:"name"`
 	PluginID string `json:"pluginID"`
+        RegionID string `json:"regionId"`
 	ID       string `json:"id"`
 	Status   string `json:"status"`
 	/*
