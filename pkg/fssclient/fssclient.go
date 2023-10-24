@@ -28,6 +28,7 @@ type AuthOpts struct {
 	Password    string
 	Clustername string `gcfg:"cluster-name"`
 	Restartmode string `gcfg:"restart-mode"`
+        Regionid    string
 	Insecure    bool
 }
 
@@ -381,6 +382,7 @@ func NewFssClient(k8sClientSet kubernetes.Interface, podNamespace string, cfg *A
 			AdminUp:  false,
 			Name:     "ncs-" + cfg.Clustername,
 			PluginID: f.plugin.ID,
+                        RegionID: cfg.Regionid,
 		}
 		jsonRequest, _ := json.Marshal(f.deployment)
 		statusCode, jsonResponse, err := f.POST(deploymentPath, jsonRequest)
