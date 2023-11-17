@@ -139,13 +139,18 @@ func (c *TopologyController) handleNodeUpdateEvent(oldObj, newObj interface{}) {
 	}
 	// Check node annotation change on nokia.com/network-topology
 	anno1 := oldNode.GetAnnotations()
-	topo1, _ := anno1[datatypes.NetworkTopologyKey]
+	topo1, ok1 := anno1[datatypes.NetworkTopologyKey]
 	anno := newNode.GetAnnotations()
 	topo, ok := anno[datatypes.NetworkTopologyKey]
 	if !ok {
 		return
 	}
 	if topo1 != topo {
+                if ok1 {
+                        klog.Infof("Node Topology Change, detach old node first %s", oldNode.ObjectMeta.Name)
+                        workItemOldNode := WorkItem{action: datatypes.NodeDetach, node: oldNode}
+                        c.workqueue.Add(workItemOldNode)
+                }
 		// No-op for BM
 		updated, err := c.vlanProvider.UpdateNodeTopology(newNode.ObjectMeta.Name, topo)
 		if err != nil {
