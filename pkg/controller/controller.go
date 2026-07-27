@@ -28,11 +28,11 @@ import (
 
 	"github.com/containernetworking/cni/libcni"
 	"github.com/golang/glog"
-	"gopkg.in/k8snetworkplumbingwg/multus-cni.v4/pkg/logging"
-	"gopkg.in/k8snetworkplumbingwg/multus-cni.v4/pkg/types"
 	"github.com/k8snetworkplumbingwg/net-attach-def-admission-controller/pkg/localmetrics"
 	networkv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	netattachdefClientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
+	"gopkg.in/k8snetworkplumbingwg/multus-cni.v4/pkg/logging"
+	"gopkg.in/k8snetworkplumbingwg/multus-cni.v4/pkg/types"
 	api_v1 "k8s.io/api/core/v1"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
