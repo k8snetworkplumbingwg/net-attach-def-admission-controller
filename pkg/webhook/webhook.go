@@ -53,30 +53,55 @@ var (
 	clientset kubernetes.Interface
 )
 
-// validateCNIConfig verifies following fields
-// conf: 'type'
-// conflist: 'plugins' and 'type'
+
+// validateBondCNIConfig rejects bond CNI configs where linksInContainer is not
+// explicitly true. Set BOND_CNI_LINKS_IN_CONTAINER_FALSE_ALLOWED to permit
+// bond NADs where linksInContainer is false or absent.
+//
+// This is intended to become the default enforced behavior: in production
+// Kubernetes, bond CNI is expected to run as a chained plugin on top of
+// SR-IOV or host-device, where member interfaces are already present in the
+// pod network namespace before bond CNI executes.
+func validateBondCNIConfig(config map[string]any) error {
+	if v, ok := config["linksInContainer"].(bool); ok && v {
+		return nil
+	}
+	if os.Getenv("BOND_CNI_LINKS_IN_CONTAINER_FALSE_ALLOWED") != "" {
+		return nil
+	}
+	return fmt.Errorf("bond CNI plugin requires linksInContainer: true; set BOND_CNI_LINKS_IN_CONTAINER_FALSE_ALLOWED to permit linksInContainer: false")
+}
+
+// validateCNIConfig verifies following fields:
+// - single config: 'type' must be present; bond is not permitted as standalone config
+// - conflist: each entry in 'plugins' must have 'type'; bond plugins must have
+//   linksInContainer: true unless BOND_CNI_LINKS_IN_CONTAINER_FALSE_ALLOWED is set
 func validateCNIConfig(config []byte) error {
 	var c map[string]interface{}
 	if err := json.Unmarshal(config, &c); err != nil {
 		return err
 	}
 
-	// Identify target is single CNI config or plugins
-	if p, ok := c["plugins"]; ok {
-		// CNI conflist
-		// check 'type' field for each plugin in 'plugins'
-		plugins := p.([]interface{})
-		for _, v := range plugins {
-			plugin := v.(map[string]interface{})
-			if _, ok := plugin["type"]; !ok {
-				return fmt.Errorf("missing 'type' in plugins")
-			}
-		}
-	} else {
-		// single CNI config
+	p, ok := c["plugins"]
+	if !ok {
 		if _, ok := c["type"]; !ok {
 			return fmt.Errorf("missing 'type' in cni config")
+		}
+		if c["type"] == "bond" {
+			return fmt.Errorf("bond CNI must be used as a chained plugin in a conflist, not as a standalone config")
+		}
+		return nil
+	}
+
+	for _, v := range p.([]any) {
+		cniPlugin := v.(map[string]any)
+		if _, ok := cniPlugin["type"]; !ok {
+			return fmt.Errorf("missing 'type' in plugins")
+		}
+		if cniPlugin["type"] == "bond" {
+			if err := validateBondCNIConfig(cniPlugin); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -134,7 +159,6 @@ func validateNetworkAttachmentDefinition(netAttachDef netv1.NetworkAttachmentDef
 			return false, err
 		}
 		if err := validateCNIConfig(confBytes); err != nil {
-			err := errors.New("invalid config")
 			return false, err
 		}
 		_, err = libcni.ConfListFromBytes(confBytes)
