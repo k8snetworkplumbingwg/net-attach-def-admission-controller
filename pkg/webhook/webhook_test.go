@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 
 	admissionv1 "k8s.io/api/admission/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -174,6 +175,22 @@ var _ = Describe("Webhook", func() {
 			true, false,
 		),
 		Entry(
+			"bond as standalone config - always rejected",
+			netv1.NetworkAttachmentDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "some-valid-name"},
+				Spec:       netv1.NetworkAttachmentDefinitionSpec{Config: `{"cniVersion": "0.3.0", "type": "bond", "name": "bond0", "linksInContainer": true}`},
+			},
+			false, true,
+		),
+		Entry(
+			"bond as standalone config linksInContainer false - always rejected",
+			netv1.NetworkAttachmentDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "some-valid-name"},
+				Spec:       netv1.NetworkAttachmentDefinitionSpec{Config: `{"cniVersion": "0.3.0", "type": "bond", "name": "bond0", "linksInContainer": false}`},
+			},
+			false, true,
+		),
+		Entry(
 			"valid network config list",
 			netv1.NetworkAttachmentDefinition{
 				ObjectMeta: metav1.ObjectMeta{
@@ -205,5 +222,82 @@ var _ = Describe("Webhook", func() {
 			},
 			true, false,
 		),
+		Entry(
+			"conflist: bond with linksInContainer true - allowed",
+			netv1.NetworkAttachmentDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "some-valid-name"},
+				Spec: netv1.NetworkAttachmentDefinitionSpec{Config: `{
+					"cniVersion": "0.3.0",
+					"name": "bond-network",
+					"plugins": [{"type": "bond", "linksInContainer": true}, {"type": "tuning"}]
+				}`},
+			},
+			true, false,
+		),
+		Entry(
+			"conflist: bond with linksInContainer false - rejected by default",
+			netv1.NetworkAttachmentDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "some-valid-name"},
+				Spec: netv1.NetworkAttachmentDefinitionSpec{Config: `{
+					"cniVersion": "0.3.0",
+					"name": "bond-network",
+					"plugins": [{"type": "bond", "linksInContainer": false}, {"type": "tuning"}]
+				}`},
+			},
+			false, true,
+		),
 	)
+
+	Describe("Bond CNI validation with BOND_CNI_LINKS_IN_CONTAINER_FALSE_ALLOWED set", func() {
+		BeforeEach(func() {
+			os.Setenv("BOND_CNI_LINKS_IN_CONTAINER_FALSE_ALLOWED", "true")
+		})
+		AfterEach(func() {
+			os.Unsetenv("BOND_CNI_LINKS_IN_CONTAINER_FALSE_ALLOWED")
+		})
+
+		DescribeTable("validateNetworkAttachmentDefinition",
+			func(in netv1.NetworkAttachmentDefinition, out bool, shouldFail bool) {
+				actualOut, err := validateNetworkAttachmentDefinition(in)
+				Expect(actualOut).To(Equal(out))
+				if shouldFail {
+					Expect(err).To(HaveOccurred())
+				} else {
+					Expect(err).NotTo(HaveOccurred())
+				}
+			},
+			Entry(
+				"bond as standalone config - rejected even with env set",
+				netv1.NetworkAttachmentDefinition{
+					ObjectMeta: metav1.ObjectMeta{Name: "some-valid-name"},
+					Spec:       netv1.NetworkAttachmentDefinitionSpec{Config: `{"cniVersion": "0.3.0", "type": "bond", "name": "bond0", "linksInContainer": false}`},
+				},
+				false, true,
+			),
+			Entry(
+				"conflist: bond with linksInContainer false - allowed",
+				netv1.NetworkAttachmentDefinition{
+					ObjectMeta: metav1.ObjectMeta{Name: "some-valid-name"},
+					Spec: netv1.NetworkAttachmentDefinitionSpec{Config: `{
+						"cniVersion": "0.3.0",
+						"name": "bond-network",
+						"plugins": [{"type": "bond", "linksInContainer": false}, {"type": "tuning"}]
+					}`},
+				},
+				true, false,
+			),
+			Entry(
+				"conflist: bond without linksInContainer - allowed",
+				netv1.NetworkAttachmentDefinition{
+					ObjectMeta: metav1.ObjectMeta{Name: "some-valid-name"},
+					Spec: netv1.NetworkAttachmentDefinitionSpec{Config: `{
+						"cniVersion": "0.3.0",
+						"name": "bond-network",
+						"plugins": [{"type": "bond"}, {"type": "tuning"}]
+					}`},
+				},
+				true, false,
+			),
+		)
+	})
 })
