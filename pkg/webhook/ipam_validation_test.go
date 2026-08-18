@@ -123,6 +123,50 @@ var _ = Describe("Whereabouts IPAM validation", func() {
 				"abcd/24",
 			},
 		}),
+		Entry("range with invalid json type", map[string]interface{}{
+			"type":  "whereabouts",
+			"range": 1,
+		}),
+		Entry("exclude with invalid json type", map[string]interface{}{
+			"type":    "whereabouts",
+			"range":   "192.168.169.0/24",
+			"exclude": "a.b.c.d/23",
+		}),
+		Entry("ipRanges with invalid json type", map[string]interface{}{
+			"type":     "whereabouts",
+			"ipRanges": map[string]interface{}{},
+		}),
+		Entry("range_start with invalid json type", map[string]interface{}{
+			"type":        "whereabouts",
+			"range":       "192.168.169.0/24",
+			"range_start": false,
+		}),
+		Entry("invalid nested ipRanges range_start", map[string]interface{}{
+			"type": "whereabouts",
+			"ipRanges": []interface{}{
+				map[string]interface{}{
+					"range":       "192.168.20.0/24",
+					"range_start": "not-an-ip",
+				},
+			},
+		}),
+		Entry("invalid nested ipRanges range_end", map[string]interface{}{
+			"type": "whereabouts",
+			"ipRanges": []interface{}{
+				map[string]interface{}{
+					"range":     "192.168.20.0/24",
+					"range_end": "xyz",
+				},
+			},
+		}),
+		Entry("nested ipRanges range with invalid json type", map[string]interface{}{
+			"type": "whereabouts",
+			"ipRanges": []interface{}{
+				map[string]interface{}{
+					"range": 1,
+				},
+			},
+		}),
 	)
 
 	DescribeTable("validateIPAMConfigs accepts valid whereabouts ipam",
@@ -149,7 +193,9 @@ var _ = Describe("Whereabouts IPAM validation", func() {
 			"type": "whereabouts",
 			"ipRanges": []interface{}{
 				map[string]interface{}{
-					"range": "192.168.20.0/24",
+					"range":       "192.168.20.0/24",
+					"range_start": "192.168.20.10",
+					"range_end":   "192.168.20.200",
 					"exclude": []interface{}{
 						"192.168.20.1/32",
 					},

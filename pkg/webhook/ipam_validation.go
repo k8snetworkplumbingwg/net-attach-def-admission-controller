@@ -52,9 +52,15 @@ func validatePluginIPAM(plugin map[string]interface{}) error {
 }
 
 func validateWhereaboutsIPAM(ipam map[string]interface{}) error {
-	if rangeStr, ok := ipam["range"].(string); ok && rangeStr != "" {
-		if err := validateWhereaboutsRange(rangeStr); err != nil {
-			return fmt.Errorf("invalid whereabouts ipam range: %w", err)
+	if raw, ok := ipam["range"]; ok {
+		rangeStr, ok := raw.(string)
+		if !ok {
+			return fmt.Errorf("invalid whereabouts ipam range: must be a string")
+		}
+		if rangeStr != "" {
+			if err := validateWhereaboutsRange(rangeStr); err != nil {
+				return fmt.Errorf("invalid whereabouts ipam range: %w", err)
+			}
 		}
 	}
 
@@ -68,13 +74,20 @@ func validateWhereaboutsIPAM(ipam map[string]interface{}) error {
 		return err
 	}
 
-	if err := validateWhereaboutsExcludeList(ipam["exclude"]); err != nil {
-		return err
+	if raw, ok := ipam["exclude"]; ok {
+		if err := validateWhereaboutsExcludeList(raw); err != nil {
+			return err
+		}
 	}
 
-	ipRangesRaw, ok := ipam["ipRanges"].([]interface{})
+	rawIPRanges, ok := ipam["ipRanges"]
 	if !ok {
 		return nil
+	}
+
+	ipRangesRaw, ok := rawIPRanges.([]interface{})
+	if !ok {
+		return fmt.Errorf("invalid whereabouts ipam ipRanges: must be an array")
 	}
 
 	for idx, ipRangeRaw := range ipRangesRaw {
@@ -83,14 +96,36 @@ func validateWhereaboutsIPAM(ipam map[string]interface{}) error {
 			return fmt.Errorf("invalid whereabouts ipam ipRanges entry at index %d", idx)
 		}
 
-		rangeStr, _ := ipRange["range"].(string)
+		if err := validateWhereaboutsIPRangeEntry(ipRange, idx); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validateWhereaboutsIPRangeEntry(ipRange map[string]interface{}, idx int) error {
+	if raw, ok := ipRange["range"]; ok {
+		rangeStr, ok := raw.(string)
+		if !ok {
+			return fmt.Errorf("invalid whereabouts ipam ipRanges[%d].range: must be a string", idx)
+		}
 		if rangeStr != "" {
 			if err := validateWhereaboutsRange(rangeStr); err != nil {
 				return fmt.Errorf("invalid whereabouts ipam ipRanges[%d].range: %w", idx, err)
 			}
 		}
+	}
 
-		if err := validateWhereaboutsExcludeList(ipRange["exclude"]); err != nil {
+	if err := validateWhereaboutsStringIP(ipRange, "range_start"); err != nil {
+		return fmt.Errorf("invalid whereabouts ipam ipRanges[%d].range_start: %w", idx, err)
+	}
+	if err := validateWhereaboutsStringIP(ipRange, "range_end"); err != nil {
+		return fmt.Errorf("invalid whereabouts ipam ipRanges[%d].range_end: %w", idx, err)
+	}
+
+	if raw, ok := ipRange["exclude"]; ok {
+		if err := validateWhereaboutsExcludeList(raw); err != nil {
 			return fmt.Errorf("invalid whereabouts ipam ipRanges[%d].exclude: %w", idx, err)
 		}
 	}
@@ -100,7 +135,10 @@ func validateWhereaboutsIPAM(ipam map[string]interface{}) error {
 
 func validateWhereaboutsExcludeList(excludeRaw interface{}) error {
 	excludeList, ok := excludeRaw.([]interface{})
-	if !ok || len(excludeList) == 0 {
+	if !ok {
+		return fmt.Errorf("invalid whereabouts ipam exclude: must be an array")
+	}
+	if len(excludeList) == 0 {
 		return nil
 	}
 
@@ -118,8 +156,16 @@ func validateWhereaboutsExcludeList(excludeRaw interface{}) error {
 }
 
 func validateWhereaboutsStringIP(ipam map[string]interface{}, field string) error {
-	value, ok := ipam[field].(string)
-	if !ok || value == "" {
+	raw, ok := ipam[field]
+	if !ok {
+		return nil
+	}
+
+	value, ok := raw.(string)
+	if !ok {
+		return fmt.Errorf("invalid whereabouts ipam %s: must be a string", field)
+	}
+	if value == "" {
 		return nil
 	}
 
